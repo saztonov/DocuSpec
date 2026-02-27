@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create vite@latest . -- --template react-ts)",
+      "Bash(npm install antd @ant-design/icons @supabase/supabase-js react-router-dom zod)",
+      "Bash(ls \"C:/Users/Usr/claudeprojects/DocuSpec/node_modules/antd/locale/ru_RU\"*)",
+      "Bash(npx tsc -b --noEmit)",
+      "Bash(node -e \"const path = require.resolve\\(''rc-upload/package.json''\\); console.log\\(path\\);\")",
+      "Bash(ls \"C:/Users/Usr/claudeprojects/DocuSpec/node_modules/@rc-component/upload/lib/interface\"*)",
+      "Bash(npx vite build)"
+    ]
+  }
+}
