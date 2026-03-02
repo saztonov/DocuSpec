@@ -273,6 +273,11 @@ export async function llmExtractBatch(
     }
 
     onProgress?.(i + 1, blocks.length);
+
+    // Пауза между запросами, чтобы не упираться в rate limit
+    if (i < blocks.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
   }
 
   return results;
