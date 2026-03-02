@@ -21,6 +21,10 @@ RULES:
 8. For canonical_key: create a lowercase Latin slug (transliterate Russian, replace spaces with underscores).
 9. Parse Russian numeric format: "202,6" means 202.6; "1 692,9" means 1692.9.
 10. Unit should be standardized: м2, м3, шт, м.п., кг, т, л, компл.
+11. "мм" is a THICKNESS, not a quantity unit. Do NOT use "мм" as unit. If a material only has a thickness (e.g. "100мм", "150мм"), set quantity to null and mention the thickness in the description field.
+12. DO NOT extract normative documents (ГОСТ, СП, СНиП, Федеральный закон, Постановление) as materials. These are references, not construction materials.
+13. If the content is a legend/conditional notation block ("Условные обозначения") that describes material types without explicit quantities — set quantity to null for each material.
+14. For tables with grouped rows (e.g. railing specifications with group headers like "ОГ-13, L=4 700" followed by component rows), extract BOTH the group header as a separate item (with its quantity) AND each component row.
 
 Each item in the "items" array must have this structure:
 {
@@ -95,7 +99,8 @@ function parseRussianNumber(text: string): number | null {
 function parseQtyWithUnit(text: string): { qty: number | null; unit: string | null } {
   if (!text || text.trim() === '' || text.trim() === '-') return { qty: null, unit: null };
 
-  const match = text.trim().match(/^(\d[\d\s]*[,.]?\d*)\s*(м\s*\.?\s*п\.?|м\s*[23]|шт|кг|т|л|компл\.?)\s*$/i);
+  // Note: мм (millimeters) is intentionally excluded — it represents thickness, not quantity
+  const match = text.trim().match(/^(\d[\d\s]*[,.]?\d*)\s*(м\s*\.?\s*п\.?|м\s*[23]|шт|кг|т|л|компл\.?|слоя?)\s*$/i);
   if (match) {
     const numStr = match[1].replace(/\s/g, '').replace(',', '.');
     const num = parseFloat(numStr);
@@ -155,6 +160,14 @@ function extractMaterialQty(table: ParsedTable): MaterialFactItem[] {
       }
     }
 
+    // "мм" is thickness, not a quantity unit — move to description
+    let description: string | null = null;
+    if (unit && /^мм$/i.test(unit.trim())) {
+      description = quantity !== null ? `толщина ${quantity} мм` : null;
+      quantity = null;
+      unit = null;
+    }
+
     // Skip section headers (rows where name exists but qty and unit are empty)
     // These are like "K6", "K6.1" etc.
     if (quantity === null && !unit && rawName.length < 10 && /^[A-Za-zА-Яа-я0-9.]+$/.test(rawName)) {
@@ -172,7 +185,7 @@ function extractMaterialQty(table: ParsedTable): MaterialFactItem[] {
       unit,
       mark: null,
       gost: extractGost(rawName),
-      description: null,
+      description,
       note: null,
       source_snippet: buildSnippet(rawName, quantity, unit),
       confidence: 0.95,

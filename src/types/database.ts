@@ -30,6 +30,7 @@ export interface DbDocument {
   page_count: number | null;
   block_count: number | null;
   error_message: string | null;
+  model_used: string | null;
   project_id: string | null;
   section_id: string | null;
   created_at: string;

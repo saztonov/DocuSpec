@@ -19,10 +19,10 @@ export function useExtraction(docId: string) {
 
   const runExtraction = useCallback(async (model?: string) => {
     try {
-      // Update document status
+      // Update document status and save model used
       await supabase
         .from('documents')
-        .update({ status: 'extracting' })
+        .update({ status: 'extracting', model_used: model || null })
         .eq('id', docId);
 
       // Clear existing material_facts for this document
@@ -114,9 +114,12 @@ export function useExtraction(docId: string) {
             // IMAGE blocks with "Текст на чертеже:" may contain material info
             const hasDrawingText = block.content.includes('Текст на чертеже:');
             const hasMaterialKeyword = /облицовк|камен|гранит|плит|стяжк|гидроизол|утеплител|кирпич|бетон|штукатурк|армир/i.test(block.content);
-            const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг|т|л|мм|компл)/i.test(block.content);
+            // Note: мм excluded — it indicates thickness, not quantity
+            const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг|т|л|компл)/i.test(block.content);
+            // Skip legend/conditional notation blocks — they describe materials without quantities
+            const isLegend = block.content.includes('Условные обозначения') || (block.content.includes('Тип: Легенда'));
 
-            if (hasDrawingText && hasMaterialKeyword && hasQuantityPattern) {
+            if (hasDrawingText && hasMaterialKeyword && hasQuantityPattern && !isLegend) {
               blocksNeedingLlm.push({
                 block,
                 pageNo: page.pageNo,

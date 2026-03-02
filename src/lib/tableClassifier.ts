@@ -39,6 +39,13 @@ export function classifyTable(table: ParsedTable): TableCategory {
     return 'reference_docs';
   }
 
+  // Broader reference_docs detection: Обозначение + Наименование + Примечание, no quantity columns,
+  // and content looks like normative docs (ГОСТ, СП, etc.)
+  const hasNote = h.some(x => x.includes('примечание'));
+  if (hasDesignation && hasName && !hasQtyLike && hasNote && h.length <= 4) {
+    return 'reference_docs';
+  }
+
   // Drawing/sheet list (ведомость рабочих чертежей, ведомость спецификаций, ведомость основных комплектов) — skip
   // Headers like: № Листа | Наименование | Примечание
   const hasSheetNo = h.some(x => x.includes('№ листа') || x.includes('лист'));

@@ -682,6 +682,11 @@ export default function DocumentPage() {
             0
           )}
         </Descriptions.Item>
+        {document.model_used && (
+          <Descriptions.Item label="Модель распознавания">
+            <Tag color="blue">{document.model_used}</Tag>
+          </Descriptions.Item>
+        )}
       </Descriptions>
 
       {document.status === 'has_errors' && <ErrorBlocksAlert blocks={blocks} />}
