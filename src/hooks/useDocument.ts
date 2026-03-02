@@ -127,5 +127,25 @@ export function useDocument() {
     }
   }
 
-  return { uploadDocument, loading, error };
+  async function deleteDocument(docId: string): Promise<void> {
+    setLoading(true);
+    setError(null);
+    try {
+      const { error: delError } = await supabase
+        .from('documents')
+        .delete()
+        .eq('id', docId);
+      if (delError) {
+        throw new Error(`Ошибка удаления документа: ${delError.message}`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Ошибка удаления';
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return { uploadDocument, deleteDocument, loading, error };
 }

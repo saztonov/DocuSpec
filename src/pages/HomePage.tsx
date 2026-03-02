@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Typography, Upload, Space, Table, Tag, App, Divider, Select, Row, Col } from 'antd';
-import { InboxOutlined, FileTextOutlined } from '@ant-design/icons';
+import { Typography, Upload, Space, Table, Tag, App, Divider, Select, Row, Col, Button, Popconfirm } from 'antd';
+import { InboxOutlined, FileTextOutlined, DeleteOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase.ts';
 import { useDocument } from '../hooks/useDocument.ts';
 import { useProjects } from '../hooks/useProjects.ts';
@@ -37,7 +37,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function HomePage() {
   const navigate = useNavigate();
-  const { uploadDocument, loading: uploading } = useDocument();
+  const { uploadDocument, deleteDocument, loading: uploading } = useDocument();
   const { message } = App.useApp();
   const [documents, setDocuments] = useState<DbDocument[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(true);
@@ -76,6 +76,16 @@ export default function HomePage() {
       const errorMessage = err instanceof Error ? err.message : 'Ошибка загрузки';
       message.error(errorMessage);
       options.onError?.(err instanceof Error ? err : new Error(errorMessage));
+    }
+  }
+
+  async function handleDeleteDoc(docId: string) {
+    try {
+      await deleteDocument(docId);
+      message.success('Документ удалён');
+      setDocuments(prev => prev.filter(d => d.id !== docId));
+    } catch {
+      message.error('Ошибка удаления документа');
     }
   }
 
@@ -142,6 +152,22 @@ export default function HomePage() {
       key: 'created_at',
       width: 160,
       render: (v: string) => new Date(v).toLocaleString('ru-RU'),
+    },
+    {
+      title: '',
+      key: 'actions',
+      width: 50,
+      render: (_: unknown, record: DbDocument) => (
+        <Popconfirm
+          title="Удалить документ?"
+          description="Будут удалены блоки, материалы и ведомости этого документа."
+          onConfirm={() => void handleDeleteDoc(record.id)}
+          okText="Да"
+          cancelText="Нет"
+        >
+          <Button size="small" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      ),
     },
   ];
 

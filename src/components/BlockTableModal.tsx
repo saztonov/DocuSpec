@@ -23,13 +23,19 @@ export default function BlockTableModal({ block, onClose }: { block: DbDocBlock;
       onCancel={onClose}
       footer={null}
       width="80%"
+      centered
+      styles={{
+        body: {
+          maxHeight: 'calc(90vh - 110px)',
+          overflowY: 'auto',
+        },
+      }}
     >
       {tables.map((table, idx) => {
         const columns = table.headers.map((h, i) => ({
           title: h || `Колонка ${i + 1}`,
           dataIndex: `col_${i}`,
           key: `col_${i}`,
-          ellipsis: true,
         }));
 
         const dataSource = table.rows.map((row, rowIdx) => {
@@ -41,7 +47,11 @@ export default function BlockTableModal({ block, onClose }: { block: DbDocBlock;
         });
 
         return (
-          <div key={idx} style={{ marginBottom: idx < tables.length - 1 ? 24 : 0 }}>
+          <div key={idx} style={{
+            marginBottom: idx < tables.length - 1 ? 24 : 0,
+            wordBreak: 'break-word',
+            overflowWrap: 'break-word',
+          }}>
             {table.sectionContext && (
               <Title level={5} style={{ marginBottom: 8 }}>{table.sectionContext}</Title>
             )}
@@ -50,8 +60,9 @@ export default function BlockTableModal({ block, onClose }: { block: DbDocBlock;
               columns={columns}
               size="small"
               pagination={false}
-              scroll={{ x: 'max-content' }}
               bordered
+              tableLayout="fixed"
+              sticky
             />
           </div>
         );
