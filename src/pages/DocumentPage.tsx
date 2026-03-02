@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   Typography,
@@ -12,6 +12,7 @@ import {
   Button,
   Progress,
   App,
+  Modal,
 } from 'antd';
 import {
   FileTextOutlined,
@@ -25,6 +26,7 @@ import { supabase } from '../lib/supabase.ts';
 import { useBom } from '../hooks/useBom.ts';
 import { useExtraction } from '../hooks/useExtraction.ts';
 import { generateCanonicalKey } from '../lib/canonical.ts';
+import { parseTables } from '../lib/parser.ts';
 import type { DbDocument, DbDocPage, DbDocBlock, DbMaterialFact } from '../types/database.ts';
 
 const { Title, Text } = Typography;
@@ -79,8 +81,68 @@ function ErrorBlocksAlert({ blocks }: { blocks: DbDocBlock[] }) {
   );
 }
 
+// ── BlockTableModal ──
+function BlockTableModal({ block, onClose }: { block: DbDocBlock; onClose: () => void }) {
+  const tables = useMemo(() => {
+    const lines = block.content.split('\n');
+    return parseTables(lines, block.section_title);
+  }, [block]);
+
+  return (
+    <Modal
+      open
+      title={
+        <Space>
+          <Text code>{block.block_uid}</Text>
+          {block.section_title && <Text type="secondary">{block.section_title}</Text>}
+        </Space>
+      }
+      onCancel={onClose}
+      footer={null}
+      width="80%"
+    >
+      {tables.map((table, idx) => {
+        const columns = table.headers.map((h, i) => ({
+          title: h || `Колонка ${i + 1}`,
+          dataIndex: `col_${i}`,
+          key: `col_${i}`,
+          ellipsis: true,
+        }));
+
+        const dataSource = table.rows.map((row, rowIdx) => {
+          const record: Record<string, string> = { key: String(rowIdx) };
+          table.headers.forEach((_, i) => {
+            record[`col_${i}`] = row[i] ?? '';
+          });
+          return record;
+        });
+
+        return (
+          <div key={idx} style={{ marginBottom: idx < tables.length - 1 ? 24 : 0 }}>
+            {table.sectionContext && (
+              <Title level={5} style={{ marginBottom: 8 }}>{table.sectionContext}</Title>
+            )}
+            <Table
+              dataSource={dataSource}
+              columns={columns}
+              size="small"
+              pagination={false}
+              scroll={{ x: 'max-content' }}
+              bordered
+            />
+          </div>
+        );
+      })}
+      {tables.length === 0 && (
+        <Text type="secondary">Не удалось распарсить таблицу</Text>
+      )}
+    </Modal>
+  );
+}
+
 // ── BlockList ──
 function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[] }) {
+  const [selectedBlock, setSelectedBlock] = useState<DbDocBlock | null>(null);
   const pageMap = new Map(pages.map((p) => [p.id, p]));
 
   const dataSource = blocks.map((b) => {
@@ -98,6 +160,8 @@ function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[]
       content_preview: b.content.slice(0, 120) + (b.content.length > 120 ? '...' : ''),
     };
   });
+
+  const blockMap = new Map(blocks.map((b) => [b.id, b]));
 
   const columns = [
     {
@@ -152,13 +216,22 @@ function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[]
   ];
 
   return (
-    <Table
-      dataSource={dataSource}
-      columns={columns}
-      size="small"
-      pagination={{ pageSize: 20 }}
-      scroll={{ x: 900 }}
-    />
+    <>
+      <Table
+        dataSource={dataSource}
+        columns={columns}
+        size="small"
+        pagination={{ pageSize: 20 }}
+        scroll={{ x: 900 }}
+        onRow={(record) => ({
+          onClick: record.has_table ? () => setSelectedBlock(blockMap.get(record.key as string) ?? null) : undefined,
+          style: record.has_table ? { cursor: 'pointer' } : undefined,
+        })}
+      />
+      {selectedBlock && (
+        <BlockTableModal block={selectedBlock} onClose={() => setSelectedBlock(null)} />
+      )}
+    </>
   );
 }
 

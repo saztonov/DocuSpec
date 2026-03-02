@@ -8,7 +8,8 @@
       "Bash(node -e \"const path = require.resolve\\(''rc-upload/package.json''\\); console.log\\(path\\);\")",
       "Bash(ls \"C:/Users/Usr/claudeprojects/DocuSpec/node_modules/@rc-component/upload/lib/interface\"*)",
       "Bash(npx vite build)",
-      "Bash(npm run build)"
+      "Bash(npm run build)",
+      "Bash(npx tsc --noEmit)"
     ]
   }
 }

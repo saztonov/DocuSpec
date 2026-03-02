@@ -198,7 +198,7 @@ function buildBlock(uid: string, type: 'TEXT' | 'IMAGE', contentLines: string[])
   };
 }
 
-function parseTables(lines: string[], defaultSection: string | null): ParsedTable[] {
+export function parseTables(lines: string[], defaultSection: string | null): ParsedTable[] {
   const tables: ParsedTable[] = [];
   let currentSection = defaultSection;
   let i = 0;
