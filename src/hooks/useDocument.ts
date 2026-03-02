@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase.ts';
 import { parseDocument } from '../lib/parser.ts';
-import { slugify } from '../lib/canonical.ts';
 import type { DocumentStatus } from '../types/database.ts';
 
 function readFileAsText(file: File): Promise<string> {
@@ -28,25 +27,13 @@ export function useDocument() {
       // 2. Parse with parseDocument
       const parsed = parseDocument(mdText);
 
-      // 3. Upload raw file to Supabase Storage
-      const safeName = slugify(file.name.replace(/\.[^.]+$/, ''));
-      const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
-      const storagePath = `${crypto.randomUUID()}/${safeName}${ext}`;
-      const { error: storageError } = await supabase.storage
-        .from('documents')
-        .upload(storagePath, file);
-
-      if (storageError) {
-        throw new Error(`Storage upload failed: ${storageError.message}`);
-      }
-
-      // 4. Insert document record with status='parsing'
+      // 3. Insert document record with status='parsing'
       const { data: docData, error: docError } = await supabase
         .from('documents')
         .insert({
           user_id: 'anonymous',
           filename: file.name,
-          storage_path: storagePath,
+          raw_md: mdText,
           doc_code: parsed.docCode,
           stamp_text: parsed.stampText,
           status: 'parsing' as DocumentStatus,

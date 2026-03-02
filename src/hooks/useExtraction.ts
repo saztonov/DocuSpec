@@ -31,25 +31,18 @@ export function useExtraction(docId: string) {
         .delete()
         .eq('doc_id', docId);
 
-      // 1. Load the document file from storage to re-parse
+      // 1. Load the document raw_md to re-parse
       setProgress(p => ({ ...p, status: 'rule_based', errorMessage: null }));
 
       const { data: doc } = await supabase
         .from('documents')
-        .select('storage_path')
+        .select('raw_md')
         .eq('id', docId)
         .single();
 
-      if (!doc) throw new Error('Document not found');
+      if (!doc?.raw_md) throw new Error('Document not found or raw_md is empty');
 
-      const { data: fileData } = await supabase.storage
-        .from('documents')
-        .download(doc.storage_path);
-
-      if (!fileData) throw new Error('Could not download document file');
-
-      const mdText = await fileData.text();
-      const parsed = parseDocument(mdText);
+      const parsed = parseDocument(doc.raw_md);
 
       // 2. Load block DB records to get their IDs
       const { data: dbBlocks } = await supabase

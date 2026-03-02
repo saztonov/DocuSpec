@@ -4,7 +4,8 @@ export interface DbDocument {
   id: string;
   user_id: string;
   filename: string;
-  storage_path: string;
+  storage_path: string | null;
+  raw_md: string;
   doc_code: string | null;
   stamp_text: string | null;
   status: DocumentStatus;
