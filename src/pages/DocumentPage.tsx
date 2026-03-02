@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   Typography,
   Tabs,
@@ -12,7 +12,7 @@ import {
   Button,
   Progress,
   App,
-  Modal,
+  Select,
 } from 'antd';
 import {
   FileTextOutlined,
@@ -21,13 +21,16 @@ import {
   WarningOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
+  SaveOutlined,
 } from '@ant-design/icons';
 import { supabase } from '../lib/supabase.ts';
 import { useBom } from '../hooks/useBom.ts';
 import { useExtraction } from '../hooks/useExtraction.ts';
 import { generateCanonicalKey } from '../lib/canonical.ts';
-import { parseTables } from '../lib/parser.ts';
-import type { DbDocument, DbDocPage, DbDocBlock, DbMaterialFact } from '../types/database.ts';
+import { getAvailableModels } from '../lib/models.ts';
+import BlockTableModal from '../components/BlockTableModal.tsx';
+import BlockLink from '../components/BlockLink.tsx';
+import type { DbDocument, DbDocPage, DbDocBlock, DbMaterialFact, DbBomSummary } from '../types/database.ts';
 
 const { Title, Text } = Typography;
 
@@ -81,65 +84,6 @@ function ErrorBlocksAlert({ blocks }: { blocks: DbDocBlock[] }) {
   );
 }
 
-// ── BlockTableModal ──
-function BlockTableModal({ block, onClose }: { block: DbDocBlock; onClose: () => void }) {
-  const tables = useMemo(() => {
-    const lines = block.content.split('\n');
-    return parseTables(lines, block.section_title);
-  }, [block]);
-
-  return (
-    <Modal
-      open
-      title={
-        <Space>
-          <Text code>{block.block_uid}</Text>
-          {block.section_title && <Text type="secondary">{block.section_title}</Text>}
-        </Space>
-      }
-      onCancel={onClose}
-      footer={null}
-      width="80%"
-    >
-      {tables.map((table, idx) => {
-        const columns = table.headers.map((h, i) => ({
-          title: h || `Колонка ${i + 1}`,
-          dataIndex: `col_${i}`,
-          key: `col_${i}`,
-          ellipsis: true,
-        }));
-
-        const dataSource = table.rows.map((row, rowIdx) => {
-          const record: Record<string, string> = { key: String(rowIdx) };
-          table.headers.forEach((_, i) => {
-            record[`col_${i}`] = row[i] ?? '';
-          });
-          return record;
-        });
-
-        return (
-          <div key={idx} style={{ marginBottom: idx < tables.length - 1 ? 24 : 0 }}>
-            {table.sectionContext && (
-              <Title level={5} style={{ marginBottom: 8 }}>{table.sectionContext}</Title>
-            )}
-            <Table
-              dataSource={dataSource}
-              columns={columns}
-              size="small"
-              pagination={false}
-              scroll={{ x: 'max-content' }}
-              bordered
-            />
-          </div>
-        );
-      })}
-      {tables.length === 0 && (
-        <Text type="secondary">Не удалось распарсить таблицу</Text>
-      )}
-    </Modal>
-  );
-}
-
 // ── BlockList ──
 function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[] }) {
   const [selectedBlock, setSelectedBlock] = useState<DbDocBlock | null>(null);
@@ -164,6 +108,12 @@ function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[]
   const blockMap = new Map(blocks.map((b) => [b.id, b]));
 
   const columns = [
+    {
+      title: '№',
+      key: 'rowNum',
+      width: 50,
+      render: (_: unknown, __: unknown, index: number) => index + 1,
+    },
     {
       title: 'Стр.',
       dataIndex: 'page_no',
@@ -221,7 +171,7 @@ function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[]
         dataSource={dataSource}
         columns={columns}
         size="small"
-        pagination={{ pageSize: 20 }}
+        pagination={{ defaultPageSize: 20 }}
         scroll={{ x: 900 }}
         onRow={(record) => ({
           onClick: record.has_table ? () => setSelectedBlock(blockMap.get(record.key as string) ?? null) : undefined,
@@ -280,6 +230,12 @@ function MaterialFactTable({ docId }: { docId: string }) {
   }
 
   const columns = [
+    {
+      title: '№',
+      key: 'rowNum',
+      width: 50,
+      render: (_: unknown, __: unknown, index: number) => index + 1,
+    },
     { title: 'Наименование', dataIndex: 'raw_name', key: 'raw_name', width: 250, ellipsis: true },
     {
       title: 'Канон. имя',
@@ -318,6 +274,13 @@ function MaterialFactTable({ docId }: { docId: string }) {
     { title: 'Марка', dataIndex: 'mark', key: 'mark', width: 100, ellipsis: true },
     { title: 'ГОСТ', dataIndex: 'gost', key: 'gost', width: 130, ellipsis: true },
     {
+      title: 'Блок',
+      dataIndex: 'block_id',
+      key: 'block_id',
+      width: 130,
+      render: (v: string) => <BlockLink blockId={v} />,
+    },
+    {
       title: 'Источник',
       dataIndex: 'source_snippet',
       key: 'source_snippet',
@@ -344,17 +307,20 @@ function MaterialFactTable({ docId }: { docId: string }) {
       columns={columns}
       size="small"
       loading={loading}
-      pagination={{ pageSize: 30 }}
+      pagination={{ defaultPageSize: 30 }}
       scroll={{ x: 1100 }}
       locale={{ emptyText: 'Материалы ещё не извлечены. Нажмите "Собрать ведомость".' }}
     />
   );
 }
 
-// ── BomView with expandable rows + CSV export ──
-function BomView({ docId }: { docId: string }) {
+// ── BomView with expandable rows + CSV export + save statement ──
+function BomView({ docId, filename, modelUsed }: { docId: string; filename: string; modelUsed?: string }) {
   const { bomLines, loading, error } = useBom(docId);
   const [expandedFacts, setExpandedFacts] = useState<Map<string, DbMaterialFact[]>>(new Map());
+  const [saving, setSaving] = useState(false);
+  const { message: msg } = App.useApp();
+  const navigate = useNavigate();
 
   async function loadFactsForKey(canonicalKey: string) {
     if (expandedFacts.has(canonicalKey)) return;
@@ -387,11 +353,67 @@ function BomView({ docId }: { docId: string }) {
     URL.revokeObjectURL(url);
   }
 
+  async function saveStatement() {
+    setSaving(true);
+    try {
+      const baseName = filename.replace(/\.md$/i, '');
+      const { data: existing } = await supabase
+        .from('statements')
+        .select('name')
+        .like('name', `${baseName}%`);
+
+      let name = baseName;
+      if (existing && existing.length > 0) {
+        const existingNames = new Set(existing.map((s: { name: string }) => s.name));
+        if (existingNames.has(baseName)) {
+          let counter = 2;
+          while (existingNames.has(`${baseName} (${counter})`)) counter++;
+          name = `${baseName} (${counter})`;
+        }
+      }
+
+      const { data: stmt, error: stmtErr } = await supabase
+        .from('statements')
+        .insert({ doc_id: docId, name, model_used: modelUsed || null, item_count: bomLines.length })
+        .select('id')
+        .single();
+
+      if (stmtErr || !stmt) throw new Error(stmtErr?.message ?? 'Ошибка создания ведомости');
+
+      const items = bomLines.map((b: DbBomSummary) => ({
+        statement_id: stmt.id,
+        canonical_key: b.canonical_key,
+        canonical_name: b.canonical_name,
+        unit: b.unit,
+        total_qty: b.total_qty,
+        fact_count: b.fact_count,
+        source_block_ids: b.source_block_ids,
+        user_verified: b.all_verified,
+      }));
+
+      const { error: itemsErr } = await supabase.from('statement_items').insert(items);
+      if (itemsErr) throw new Error(itemsErr.message);
+
+      msg.success(`Ведомость "${name}" сохранена`);
+      navigate(`/statements/${stmt.id}`);
+    } catch (err) {
+      msg.error(err instanceof Error ? err.message : 'Ошибка сохранения');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (error) {
     return <Alert type="error" message="Ошибка загрузки ведомости" description={error} />;
   }
 
   const columns = [
+    {
+      title: '№',
+      key: 'rowNum',
+      width: 50,
+      render: (_: unknown, __: unknown, index: number) => index + 1,
+    },
     { title: 'Наименование', dataIndex: 'canonical_name', key: 'canonical_name', ellipsis: true },
     { title: 'Канон. ключ', dataIndex: 'canonical_key', key: 'canonical_key', width: 200, ellipsis: true },
     { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 60 },
@@ -415,16 +437,21 @@ function BomView({ docId }: { docId: string }) {
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
       {bomLines.length > 0 && (
-        <Button onClick={exportCsv} style={{ alignSelf: 'flex-end' }}>
-          Экспорт CSV
-        </Button>
+        <Space>
+          <Button icon={<SaveOutlined />} type="primary" onClick={() => void saveStatement()} loading={saving}>
+            Сохранить ведомость
+          </Button>
+          <Button onClick={exportCsv}>
+            Экспорт CSV
+          </Button>
+        </Space>
       )}
       <Table
         dataSource={bomLines.map((b) => ({ ...b, key: b.canonical_key }))}
         columns={columns}
         size="small"
         loading={loading}
-        pagination={{ pageSize: 30 }}
+        pagination={{ defaultPageSize: 30 }}
         scroll={{ x: 800 }}
         locale={{ emptyText: 'Сводная ведомость пока пуста' }}
         expandable={{
@@ -439,7 +466,7 @@ function BomView({ docId }: { docId: string }) {
                   { title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 80 },
                   { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 60 },
                   { title: 'Источник (snippet)', dataIndex: 'source_snippet', key: 'source_snippet', ellipsis: true },
-                  { title: 'Блок', dataIndex: 'block_id', key: 'block_id', width: 120, ellipsis: true },
+                  { title: 'Блок', dataIndex: 'block_id', key: 'block_id', width: 130, render: (v: string) => <BlockLink blockId={v} /> },
                 ]}
                 size="small"
                 pagination={false}
@@ -456,15 +483,21 @@ function BomView({ docId }: { docId: string }) {
 }
 
 // ── ExtractionProgress ──
-function ExtractionProgress({ docId, onComplete }: { docId: string; onComplete?: () => void }) {
+function ExtractionProgress({ docId, onComplete, selectedModel, onModelChange }: {
+  docId: string;
+  onComplete?: () => void;
+  selectedModel: string;
+  onModelChange: (model: string) => void;
+}) {
   const { progress, runExtraction } = useExtraction(docId);
   const { message } = App.useApp();
+  const models = getAvailableModels();
 
   const isRunning = progress.status !== 'idle' && progress.status !== 'done' && progress.status !== 'error';
 
   async function handleStart() {
     try {
-      await runExtraction();
+      await runExtraction(selectedModel || undefined);
       message.success(`Извлечение завершено: ${progress.extractedFacts} материалов`);
       onComplete?.();
     } catch (err) {
@@ -488,8 +521,17 @@ function ExtractionProgress({ docId, onComplete }: { docId: string; onComplete?:
     : 0;
 
   return (
-    <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
+    <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
       <Space>
+        {models.length > 1 && (
+          <Select
+            value={selectedModel}
+            onChange={onModelChange}
+            options={models}
+            style={{ width: 260 }}
+            disabled={isRunning}
+          />
+        )}
         <Button
           type="primary"
           icon={<PlayCircleOutlined />}
@@ -534,6 +576,8 @@ export default function DocumentPage() {
   const [blocks, setBlocks] = useState<DbDocBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const models = getAvailableModels();
+  const [selectedModel, setSelectedModel] = useState(models[0]?.value ?? '');
 
   useEffect(() => {
     if (!id) return;
@@ -611,7 +655,7 @@ export default function DocumentPage() {
           <UnorderedListOutlined /> Сводная ведомость
         </span>
       ),
-      children: <BomView docId={document.id} />,
+      children: <BomView docId={document.id} filename={document.filename} modelUsed={selectedModel} />,
     },
   ];
 
@@ -644,7 +688,12 @@ export default function DocumentPage() {
 
       <Tabs items={tabItems} defaultActiveKey="blocks" />
 
-      <ExtractionProgress docId={document.id} onComplete={() => window.location.reload()} />
+      <ExtractionProgress
+        docId={document.id}
+        onComplete={() => window.location.reload()}
+        selectedModel={selectedModel}
+        onModelChange={setSelectedModel}
+      />
     </Space>
   );
 }

@@ -234,6 +234,7 @@ export interface BlockForExtraction {
 export async function llmExtractBatch(
   blocks: BlockForExtraction[],
   onProgress?: (completed: number, total: number) => void,
+  model?: string,
 ): Promise<Map<string, MaterialFactItem[]>> {
   const results = new Map<string, MaterialFactItem[]>();
 
@@ -247,6 +248,7 @@ export async function llmExtractBatch(
           { role: 'user', content: buildUserPrompt(block, pageNo, sectionContext) },
         ],
         temperature: 0.1,
+        model,
       });
 
       const parsed = JSON.parse(response.content);

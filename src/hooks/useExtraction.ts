@@ -17,7 +17,7 @@ export function useExtraction(docId: string) {
     errorMessage: null,
   });
 
-  const runExtraction = useCallback(async () => {
+  const runExtraction = useCallback(async (model?: string) => {
     try {
       // Update document status
       await supabase
@@ -138,6 +138,7 @@ export function useExtraction(docId: string) {
               totalBatches: total,
             }));
           },
+          model,
         );
 
         // 6. Merge and save LLM results

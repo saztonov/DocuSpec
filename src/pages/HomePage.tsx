@@ -70,6 +70,12 @@ export default function HomePage() {
 
   const columns = [
     {
+      title: '№',
+      key: 'rowNum',
+      width: 50,
+      render: (_: unknown, __: unknown, index: number) => index + 1,
+    },
+    {
       title: 'Документ',
       dataIndex: 'filename',
       key: 'filename',
@@ -129,6 +135,7 @@ export default function HomePage() {
   ];
 
   return (
+    <div style={{ maxWidth: 1000, margin: '0 auto', width: '100%' }}>
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <Title level={2}>Загрузка документа</Title>
 
@@ -159,11 +166,12 @@ export default function HomePage() {
             columns={columns}
             size="small"
             loading={loadingDocs}
-            pagination={{ pageSize: 10 }}
+            pagination={{ defaultPageSize: 10 }}
             scroll={{ x: 800 }}
           />
         </>
       )}
     </Space>
+    </div>
   );
 }

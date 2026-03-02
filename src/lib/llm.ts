@@ -23,6 +23,7 @@ export interface LlmOptions {
   messages: LlmMessage[];
   temperature?: number;
   timeoutMs?: number;
+  model?: string;
 }
 
 export interface LlmJsonResponse {
@@ -37,7 +38,8 @@ export interface LlmJsonResponse {
  * Retries once on failure.
  */
 export async function callLlmJson(options: LlmOptions): Promise<LlmJsonResponse> {
-  const { messages, temperature = 0.1, timeoutMs = 60000 } = options;
+  const { messages, temperature = 0.1, timeoutMs = 60000, model } = options;
+  const effectiveModel = model || getModel();
 
   let lastError: Error | null = null;
 
@@ -55,7 +57,7 @@ export async function callLlmJson(options: LlmOptions): Promise<LlmJsonResponse>
           'X-Title': 'DocuSpec',
         },
         body: JSON.stringify({
-          model: getModel(),
+          model: effectiveModel,
           messages,
           temperature,
           response_format: { type: 'json_object' },
@@ -79,7 +81,7 @@ export async function callLlmJson(options: LlmOptions): Promise<LlmJsonResponse>
 
       return {
         content: choice.message.content,
-        model: data.model || getModel(),
+        model: data.model || effectiveModel,
         usage: data.usage,
       };
     } catch (err) {

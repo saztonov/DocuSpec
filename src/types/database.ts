@@ -61,6 +61,28 @@ export interface DbMaterialFact {
   updated_at: string;
 }
 
+export interface DbStatement {
+  id: string;
+  doc_id: string;
+  name: string;
+  model_used: string | null;
+  item_count: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbStatementItem {
+  id: string;
+  statement_id: string;
+  canonical_key: string;
+  canonical_name: string;
+  unit: string | null;
+  total_qty: number | null;
+  fact_count: number;
+  source_block_ids: string[];
+  user_verified: boolean;
+}
+
 export interface DbBomSummary {
   doc_id: string;
   canonical_key: string;
