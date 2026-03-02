@@ -340,7 +340,7 @@ function BomView({ docId }: { docId: string }) {
   ];
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <Space orientation="vertical" style={{ width: '100%' }}>
       {bomLines.length > 0 && (
         <Button onClick={exportCsv} style={{ alignSelf: 'flex-end' }}>
           Экспорт CSV
@@ -415,7 +415,7 @@ function ExtractionProgress({ docId, onComplete }: { docId: string; onComplete?:
     : 0;
 
   return (
-    <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+    <Space orientation="vertical" style={{ width: '100%', marginTop: 16 }}>
       <Space>
         <Button
           type="primary"
@@ -543,7 +543,7 @@ export default function DocumentPage() {
   ];
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Title level={3}>{document.filename}</Title>
 
       <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>

@@ -129,7 +129,7 @@ export default function HomePage() {
   ];
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <Title level={2}>Загрузка документа</Title>
 
       <Dragger
