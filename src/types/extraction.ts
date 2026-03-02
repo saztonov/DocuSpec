@@ -29,6 +29,8 @@ export type TableCategory =
   | 'roof_spec'
   | 'room_schedule'
   | 'change_log'
+  | 'reference_docs'
+  | 'drawing_list'
   | 'unknown';
 
 export interface ExtractionProgress {

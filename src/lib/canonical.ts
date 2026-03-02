@@ -20,9 +20,11 @@ function transliterate(text: string): string {
 
 export function slugify(text: string): string {
   return transliterate(text)
-    .replace(/[^a-z0-9]+/g, '_')  // Replace non-alphanumeric sequences with _
-    .replace(/^_+|_+$/g, '')      // Trim leading/trailing underscores
-    .replace(/_+/g, '_');          // Collapse multiple underscores
+    .replace(/[-–—]+/g, '-')       // Normalize all dash types to hyphen
+    .replace(/[^a-z0-9-]+/g, '_')  // Replace non-alphanumeric (except hyphen) with _
+    .replace(/^[_-]+|[_-]+$/g, '') // Trim leading/trailing underscores and hyphens
+    .replace(/_+/g, '_')           // Collapse multiple underscores
+    .replace(/-+/g, '-');          // Collapse multiple hyphens
 }
 
 /**

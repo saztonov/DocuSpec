@@ -88,20 +88,72 @@ function parseRussianNumber(text: string): number | null {
   return isNaN(num) ? null : num;
 }
 
+/**
+ * Parse a cell value that contains both number and unit, e.g. "10,5 м 2" → { qty: 10.5, unit: "м2" }
+ * Handles OCR artifacts like "м 2" (space between м and 2).
+ */
+function parseQtyWithUnit(text: string): { qty: number | null; unit: string | null } {
+  if (!text || text.trim() === '' || text.trim() === '-') return { qty: null, unit: null };
+
+  const match = text.trim().match(/^(\d[\d\s]*[,.]?\d*)\s*(м\s*\.?\s*п\.?|м\s*[23]|шт|кг|т|л|компл\.?)\s*$/i);
+  if (match) {
+    const numStr = match[1].replace(/\s/g, '').replace(',', '.');
+    const num = parseFloat(numStr);
+    const unit = match[2].replace(/\s/g, '');
+    return { qty: isNaN(num) ? null : num, unit };
+  }
+
+  return { qty: null, unit: null };
+}
+
+/**
+ * Extract unit from a column header like "Объем, м 3" → "м3", "Площадь, м 2" → "м2"
+ */
+function extractUnitFromHeader(header: string): string | null {
+  const match = header.match(/,\s*(м\s*[23]|шт|м\.?п\.?|кг|т|л|компл)/i);
+  if (match) return match[1].replace(/\s/g, '');
+  return null;
+}
+
 function extractMaterialQty(table: ParsedTable): MaterialFactItem[] {
   const results: MaterialFactItem[] = [];
   const nameIdx = findColumnIndex(table.headers, 'наименование');
-  const qtyIdx = findColumnIndex(table.headers, 'количество', 'кол-во', 'кол');
+  const qtyIdx = findColumnIndex(table.headers, 'количество', 'кол-во', 'кол', 'объем', 'объём');
   const unitIdx = findColumnIndex(table.headers, 'ед.изм', 'ед.', 'ед');
 
   if (nameIdx === -1) return results;
+
+  // Try extracting unit from quantity column header (e.g. "Объем, м 3")
+  const headerUnit = qtyIdx !== -1 ? extractUnitFromHeader(table.headers[qtyIdx]) : null;
 
   for (const row of table.rows) {
     const rawName = row[nameIdx]?.trim();
     if (!rawName) continue;
 
-    const quantity = qtyIdx !== -1 ? parseRussianNumber(row[qtyIdx]) : null;
-    const unit = unitIdx !== -1 ? row[unitIdx]?.trim() || null : null;
+    let quantity = qtyIdx !== -1 ? parseRussianNumber(row[qtyIdx]) : null;
+    let unit = unitIdx !== -1 ? (row[unitIdx]?.trim() || null) : headerUnit;
+
+    // If no dedicated qty/unit columns, scan all cells for combined "number + unit" values
+    if (quantity === null && unit === null) {
+      for (let ci = 0; ci < row.length; ci++) {
+        if (ci === nameIdx) continue; // Skip name column
+        const parsed = parseQtyWithUnit(row[ci]);
+        if (parsed.qty !== null) {
+          quantity = parsed.qty;
+          unit = parsed.unit;
+          break;
+        }
+      }
+    }
+
+    // If unit column exists but contains combined value (e.g. "10,5 м 2")
+    if (quantity === null && unitIdx !== -1) {
+      const parsed = parseQtyWithUnit(row[unitIdx]);
+      if (parsed.qty !== null) {
+        quantity = parsed.qty;
+        unit = parsed.unit;
+      }
+    }
 
     // Skip section headers (rows where name exists but qty and unit are empty)
     // These are like "K6", "K6.1" etc.

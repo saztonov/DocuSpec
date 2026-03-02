@@ -22,6 +22,37 @@ export function classifyTable(table: ParsedTable): TableCategory {
     return 'room_schedule';
   }
 
+  // Reference documents (ведомость ссылочных/прилагаемых документов, ведомость нормативных) — skip
+  // Headers like: Обозначение | Наименование | Примечание (without quantity columns)
+  // Also matches via section context keywords
+  const hasDesignation = h.some(x => x.includes('обозначение'));
+  const hasName = h.some(x => x.includes('наименование'));
+  const hasQtyLike = h.some(x =>
+    x.includes('количество') || x.includes('кол-во') || x.includes('кол') ||
+    x.includes('объем') || x.includes('объём') || x.includes('площадь')
+  );
+  const sectionLower = (table.sectionContext || '').toLowerCase();
+  const isRefByContext = sectionLower.includes('ссылочн') || sectionLower.includes('прилагаем') ||
+    sectionLower.includes('нормативн');
+
+  if (hasDesignation && hasName && !hasQtyLike && isRefByContext) {
+    return 'reference_docs';
+  }
+
+  // Drawing/sheet list (ведомость рабочих чертежей, ведомость спецификаций, ведомость основных комплектов) — skip
+  // Headers like: № Листа | Наименование | Примечание
+  const hasSheetNo = h.some(x => x.includes('№ листа') || x.includes('лист'));
+  const isDrawingByContext = sectionLower.includes('ведомость рабочих чертежей') ||
+    sectionLower.includes('ведомость спецификаций') ||
+    sectionLower.includes('ведомость основных комплект');
+
+  if (hasSheetNo && hasName && !hasQtyLike) {
+    return 'drawing_list';
+  }
+  if (isDrawingByContext && hasName && !hasQtyLike) {
+    return 'drawing_list';
+  }
+
   // Direct material quantity tables: Наименование + Количество + Ед.изм.
   if (
     h.some(x => x.includes('наименование')) &&
@@ -35,6 +66,14 @@ export function classifyTable(table: ParsedTable): TableCategory {
   if (
     h.some(x => x.includes('наименование')) &&
     h.some(x => x.includes('количество'))
+  ) {
+    return 'material_qty';
+  }
+
+  // Material quantity with "Объем" column (Сводная ведомость материалов)
+  if (
+    h.some(x => x.includes('наименование')) &&
+    h.some(x => x.includes('объем') || x.includes('объём'))
   ) {
     return 'material_qty';
   }
@@ -87,5 +126,6 @@ export function classifyTable(table: ParsedTable): TableCategory {
  * Check if a table category should be extracted for materials.
  */
 export function isExtractableCategory(category: TableCategory): boolean {
-  return category !== 'change_log' && category !== 'room_schedule';
+  return category !== 'change_log' && category !== 'room_schedule' &&
+    category !== 'reference_docs' && category !== 'drawing_list';
 }

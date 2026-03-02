@@ -68,44 +68,60 @@ export function useExtraction(docId: string) {
 
       for (const page of parsed.pages) {
         for (const block of page.blocks) {
-          if (block.hasError || block.type !== 'TEXT') continue;
+          if (block.hasError) continue;
 
           const dbId = blockUidToDbId.get(block.uid);
           if (!dbId) continue;
 
-          // Try rule-based extraction first
-          if (block.hasTable) {
-            const ruleItems = ruleBasedExtract(block);
-            if (ruleItems.length > 0) {
-              ruleBasedResults.set(dbId, ruleItems);
-            }
+          if (block.type === 'TEXT') {
+            // Try rule-based extraction first
+            if (block.hasTable) {
+              const ruleItems = ruleBasedExtract(block);
+              if (ruleItems.length > 0) {
+                ruleBasedResults.set(dbId, ruleItems);
+              }
 
-            // Check if any tables need LLM (non-trivial categories)
-            const hasComplexTables = block.tables.some(t => {
-              const cat = classifyTable(t);
-              return isExtractableCategory(cat) && cat !== 'material_qty' && cat !== 'element_spec' && cat !== 'spec_elements';
-            });
-
-            const hasUnknownTables = block.tables.some(t => classifyTable(t) === 'unknown');
-
-            if (hasComplexTables || hasUnknownTables || ruleItems.length === 0) {
-              blocksNeedingLlm.push({
-                block,
-                pageNo: page.pageNo,
-                blockDbId: dbId,
-                sectionContext: block.sectionTitle,
+              // Check if any tables need LLM (non-trivial categories)
+              const hasComplexTables = block.tables.some(t => {
+                const cat = classifyTable(t);
+                return isExtractableCategory(cat) && cat !== 'material_qty' && cat !== 'element_spec' && cat !== 'spec_elements';
               });
+
+              const hasUnknownTables = block.tables.some(t => classifyTable(t) === 'unknown');
+
+              if (hasComplexTables || hasUnknownTables || ruleItems.length === 0) {
+                blocksNeedingLlm.push({
+                  block,
+                  pageNo: page.pageNo,
+                  blockDbId: dbId,
+                  sectionContext: block.sectionTitle,
+                });
+              }
+            } else {
+              // Text blocks without tables — might still contain material mentions
+              // Only send to LLM if content seems relevant (has quantity-like patterns)
+              const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг|т|л|компл)/i.test(block.content);
+              if (hasQuantityPattern) {
+                blocksNeedingLlm.push({
+                  block,
+                  pageNo: page.pageNo,
+                  blockDbId: dbId,
+                  sectionContext: block.sectionTitle,
+                });
+              }
             }
-          } else {
-            // Text blocks without tables — might still contain material mentions
-            // Only send to LLM if content seems relevant (has quantity-like patterns)
-            const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг|т|л|компл)/i.test(block.content);
-            if (hasQuantityPattern) {
+          } else if (block.type === 'IMAGE') {
+            // IMAGE blocks with "Текст на чертеже:" may contain material info
+            const hasDrawingText = block.content.includes('Текст на чертеже:');
+            const hasMaterialKeyword = /облицовк|камен|гранит|плит|стяжк|гидроизол|утеплител|кирпич|бетон|штукатурк|армир/i.test(block.content);
+            const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг|т|л|мм|компл)/i.test(block.content);
+
+            if (hasDrawingText && hasMaterialKeyword && hasQuantityPattern) {
               blocksNeedingLlm.push({
                 block,
                 pageNo: page.pageNo,
                 blockDbId: dbId,
-                sectionContext: block.sectionTitle,
+                sectionContext: block.sectionTitle ?? 'Текст на чертеже',
               });
             }
           }

@@ -235,21 +235,55 @@ export function parseTables(lines: string[], defaultSection: string | null): Par
   return tables;
 }
 
+/**
+ * Detect if a table row is a "merged title" row (e.g. "Спецификация элементов фасада | | | | |").
+ * These appear when the first row of a table is a spanning title, not actual column headers.
+ */
+function isMergedTitleRow(cells: string[]): boolean {
+  const nonEmpty = cells.filter(c => c.trim().length > 0);
+  if (nonEmpty.length > 1) return false; // Multiple non-empty cells → likely real headers
+  if (nonEmpty.length === 0) return true; // All empty → definitely a title row or separator
+
+  // Single non-empty cell: check if it looks like a section title
+  const text = nonEmpty[0].toLowerCase();
+  const titlePatterns = [
+    'спецификация', 'ведомость', 'сводная', 'перечень',
+    'экспликация', 'каталог', 'реестр',
+  ];
+  return titlePatterns.some(p => text.includes(p));
+}
+
 function parseMarkdownTable(tableLines: string[], sectionContext: string | null): ParsedTable | null {
   if (tableLines.length < 2) return null;
 
   // First line is headers
-  const headers = splitTableRow(tableLines[0]);
+  let headers = splitTableRow(tableLines[0]);
 
   // Second line should be separator (---|---|---)
-  // Skip it
   let dataStart = 1;
   if (tableLines.length > 1 && TABLE_SEPARATOR_RE.test(tableLines[1])) {
     dataStart = 2;
   }
 
-  // Sometimes headers are actually in the second data row (when first row is a merged title)
-  // We handle this as-is; classifier will deal with interpretation
+  // Detect merged title row: if first row is a spanning title, use next data row as headers
+  if (isMergedTitleRow(headers) && dataStart < tableLines.length) {
+    // The merged title may provide section context
+    const titleText = headers.find(c => c.trim().length > 0)?.trim();
+    if (titleText) {
+      sectionContext = titleText;
+    }
+
+    // Use next row as real headers
+    const nextRow = splitTableRow(tableLines[dataStart]);
+    // Check if the next row after headers is another separator
+    if (dataStart + 1 < tableLines.length && TABLE_SEPARATOR_RE.test(tableLines[dataStart + 1])) {
+      headers = nextRow;
+      dataStart = dataStart + 2;
+    } else {
+      headers = nextRow;
+      dataStart = dataStart + 1;
+    }
+  }
 
   const rows: string[][] = [];
   for (let i = dataStart; i < tableLines.length; i++) {
