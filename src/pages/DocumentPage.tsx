@@ -315,7 +315,7 @@ function MaterialFactTable({ docId }: { docId: string }) {
 }
 
 // ── BomView with expandable rows + CSV export + save statement ──
-function BomView({ docId, filename, modelUsed }: { docId: string; filename: string; modelUsed?: string }) {
+function BomView({ docId, filename, modelUsed, projectId, sectionId }: { docId: string; filename: string; modelUsed?: string; projectId?: string | null; sectionId?: string | null }) {
   const { bomLines, loading, error } = useBom(docId);
   const [expandedFacts, setExpandedFacts] = useState<Map<string, DbMaterialFact[]>>(new Map());
   const [saving, setSaving] = useState(false);
@@ -374,7 +374,7 @@ function BomView({ docId, filename, modelUsed }: { docId: string; filename: stri
 
       const { data: stmt, error: stmtErr } = await supabase
         .from('statements')
-        .insert({ doc_id: docId, name, model_used: modelUsed || null, item_count: bomLines.length })
+        .insert({ doc_id: docId, name, model_used: modelUsed || null, item_count: bomLines.length, project_id: projectId ?? null, section_id: sectionId ?? null })
         .select('id')
         .single();
 
@@ -655,7 +655,7 @@ export default function DocumentPage() {
           <UnorderedListOutlined /> Сводная ведомость
         </span>
       ),
-      children: <BomView docId={document.id} filename={document.filename} modelUsed={selectedModel} />,
+      children: <BomView docId={document.id} filename={document.filename} modelUsed={selectedModel} projectId={document.project_id} sectionId={document.section_id} />,
     },
   ];
 

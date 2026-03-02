@@ -1,3 +1,20 @@
+export interface DbProject {
+  id: string;
+  name: string;
+  code: string | null;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbSection {
+  id: string;
+  code: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+}
+
 export type DocumentStatus = 'uploaded' | 'parsing' | 'extracting' | 'done' | 'error' | 'has_errors';
 
 export interface DbDocument {
@@ -13,6 +30,8 @@ export interface DbDocument {
   page_count: number | null;
   block_count: number | null;
   error_message: string | null;
+  project_id: string | null;
+  section_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -67,6 +86,8 @@ export interface DbStatement {
   name: string;
   model_used: string | null;
   item_count: number | null;
+  project_id: string | null;
+  section_id: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Typography, Upload, Space, Table, Tag, App, Divider } from 'antd';
+import { Typography, Upload, Space, Table, Tag, App, Divider, Select, Row, Col } from 'antd';
 import { InboxOutlined, FileTextOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase.ts';
 import { useDocument } from '../hooks/useDocument.ts';
+import { useProjects } from '../hooks/useProjects.ts';
+import { useSections } from '../hooks/useSections.ts';
 import type { DbDocument } from '../types/database.ts';
 
 const { Title, Text } = Typography;
@@ -39,6 +41,12 @@ export default function HomePage() {
   const { message } = App.useApp();
   const [documents, setDocuments] = useState<DbDocument[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(true);
+  const { projects, loading: loadingProjects } = useProjects();
+  const { sections, loading: loadingSections } = useSections();
+  const [selectedProjectId, setSelectedProjectId] = useState<string>();
+  const [selectedSectionId, setSelectedSectionId] = useState<string>();
+
+  const canUpload = !!selectedProjectId && !!selectedSectionId;
 
   useEffect(() => {
     async function loadDocs() {
@@ -57,7 +65,10 @@ export default function HomePage() {
     const file = options.file as File;
 
     try {
-      const docId = await uploadDocument(file);
+      const docId = await uploadDocument(file, {
+        projectId: selectedProjectId,
+        sectionId: selectedSectionId,
+      });
       message.success(`Документ "${file.name}" загружен`);
       options.onSuccess?.(docId);
       navigate(`/doc/${docId}`);
@@ -136,21 +147,52 @@ export default function HomePage() {
 
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', width: '100%' }}>
-    <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Title level={2}>Загрузка документа</Title>
+
+      <Row gutter={16}>
+        <Col span={12}>
+          <Text strong>Проект</Text>
+          <Select
+            placeholder="Выберите проект"
+            style={{ width: '100%', marginTop: 4 }}
+            value={selectedProjectId}
+            onChange={setSelectedProjectId}
+            loading={loadingProjects}
+            options={projects.map(p => ({ value: p.id, label: p.code ? `${p.code} — ${p.name}` : p.name }))}
+            showSearch
+            optionFilterProp="label"
+          />
+        </Col>
+        <Col span={12}>
+          <Text strong>Раздел</Text>
+          <Select
+            placeholder="Выберите раздел"
+            style={{ width: '100%', marginTop: 4 }}
+            value={selectedSectionId}
+            onChange={setSelectedSectionId}
+            loading={loadingSections}
+            options={sections.map(s => ({ value: s.id, label: `${s.code} — ${s.name}` }))}
+            showSearch
+            optionFilterProp="label"
+          />
+        </Col>
+      </Row>
 
       <Dragger
         accept=".md"
         multiple={false}
         showUploadList={false}
         customRequest={handleUpload}
-        disabled={uploading}
+        disabled={uploading || !canUpload}
       >
         <p className="ant-upload-drag-icon">
           <InboxOutlined />
         </p>
         <p className="ant-upload-text">
-          Нажмите или перетащите .md файл для загрузки
+          {canUpload
+            ? 'Нажмите или перетащите .md файл для загрузки'
+            : 'Сначала выберите проект и раздел'}
         </p>
         <p className="ant-upload-hint">
           Поддерживаются файлы Markdown с разметкой строительной документации

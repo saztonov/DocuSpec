@@ -16,7 +16,7 @@ export function useDocument() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function uploadDocument(file: File): Promise<string> {
+  async function uploadDocument(file: File, options?: { projectId?: string; sectionId?: string }): Promise<string> {
     setLoading(true);
     setError(null);
 
@@ -36,6 +36,8 @@ export function useDocument() {
           raw_md: mdText,
           doc_code: parsed.docCode,
           stamp_text: parsed.stampText,
+          project_id: options?.projectId ?? null,
+          section_id: options?.sectionId ?? null,
           status: 'parsing' as DocumentStatus,
           error_blocks_count: 0,
           page_count: null,
