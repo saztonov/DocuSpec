@@ -376,19 +376,27 @@ export class ExtractionLogger {
     };
   }
 
-  downloadLog(): void {
+  async downloadLog(): Promise<void> {
     const log = this.buildSessionLog();
     const json = JSON.stringify(log, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const safeName = this.docName.replace(/[^a-zA-Zа-яА-ЯёЁ0-9_-]/g, '_').slice(0, 60);
+    const safeName = this.docName.replace(/[^a-zA-Zа-яА-ЯёЁ0-9_-]/g, '_').slice(0, 60) || 'unknown';
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    a.href = url;
-    a.download = `extraction-log_${safeName}_${timestamp}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const filename = `extraction-log_${safeName}_${timestamp}.json`;
+
+    try {
+      const res = await fetch('/api/save-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename, content: json }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        console.log(`${PREFIX} Лог сохранён: ${result.path}`);
+      } else {
+        console.error(`${PREFIX} Ошибка сохранения лога: HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.error(`${PREFIX} Не удалось сохранить лог:`, err);
+    }
   }
 }
