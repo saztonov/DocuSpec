@@ -14,6 +14,7 @@ import {
   FALLBACK_PROMPT_GLOSSARY,
 } from '../lib/extraction.ts';
 import { generateCanonicalKey } from '../lib/canonical.ts';
+import { ExtractionLogger } from '../lib/extractionLogger.ts';
 import type { ExtractionProgress, MaterialFactItem, GlossaryMap, ProductFactItem } from '../types/extraction.ts';
 import type { BlockForExtraction } from '../lib/extraction.ts';
 
@@ -28,7 +29,10 @@ export function useExtraction(docId: string) {
   });
 
   const runExtraction = useCallback(async (model?: string) => {
+    const logger = new ExtractionLogger();
     try {
+      logger.logStart();
+
       await supabase
         .from('documents')
         .update({ status: 'extracting', model_used: model || null })
@@ -127,7 +131,7 @@ export function useExtraction(docId: string) {
       }
 
       if (glossaryChunks.length > 0) {
-        const glossaryItems = await llmExtractGlossary(glossaryChunks, glossaryPrompt, model);
+        const glossaryItems = await llmExtractGlossary(glossaryChunks, glossaryPrompt, model, logger);
 
         // Сохранить в doc_glossary и заполнить glossaryMap
         if (glossaryItems.length > 0) {
@@ -149,6 +153,12 @@ export function useExtraction(docId: string) {
           .from('documents')
           .update({ glossary_status: 'done' })
           .eq('id', docId);
+
+        const byType: Record<string, number> = {};
+        for (const item of glossaryItems) {
+          byType[item.item_type] = (byType[item.item_type] || 0) + 1;
+        }
+        logger.logGlossaryResult(glossaryChunks.length, glossaryItems.length, byType);
       }
 
       setProgress(p => ({ ...p, completedBatches: 1 }));
@@ -244,6 +254,18 @@ export function useExtraction(docId: string) {
 
       let totalFacts = 0;
 
+      // ── Логирование классификации ──
+      const totalClassified = vedomostBlocks.length + specBlocks.length + assemblyBlocks.length + productListBlocks.length + imageBlocks.length;
+      logger.logClassification({
+        vedomost: vedomostBlocks.length,
+        spec: specBlocks.length,
+        assembly: assemblyBlocks.length,
+        products: productListBlocks.length,
+        images: imageBlocks.length,
+        skipped: dbBlocks.length - totalClassified,
+        total: dbBlocks.length,
+      });
+
       // ════════════════════════════════════════════════════════
       // ФАЗА 1: Ведомости материалов
       // ════════════════════════════════════════════════════════
@@ -253,17 +275,20 @@ export function useExtraction(docId: string) {
       }));
 
       const vedomostNeedingLlm: BlockForExtraction[] = [];
+      let phase1RuleFacts = 0;
 
       for (const bfe of vedomostBlocks) {
         const ruleItems = ruleBasedExtract(bfe.block);
         if (ruleItems.length > 0) {
           await saveFactsToDb(docId, bfe.blockDbId, ruleItems, 'vedomost_materialov', 'Таблица');
           totalFacts += ruleItems.length;
+          phase1RuleFacts += ruleItems.length;
         } else {
           vedomostNeedingLlm.push(bfe);
         }
       }
 
+      let phase1LlmFacts = 0;
       if (vedomostNeedingLlm.length > 0) {
         setProgress(p => ({
           ...p, status: 'llm_extracting', phase: 'Фаза 1: Ведомости материалов (LLM)',
@@ -275,6 +300,8 @@ export function useExtraction(docId: string) {
           buildPromptWithGlossary(universalPrompt, glossaryMap),
           (completed, total) => setProgress(p => ({ ...p, completedBatches: completed, totalBatches: total })),
           model,
+          logger,
+          'Фаза 1',
         );
 
         for (const [blockDbId, items] of llmVedomost) {
@@ -282,9 +309,18 @@ export function useExtraction(docId: string) {
           if (filtered.length > 0) {
             await saveFactsToDb(docId, blockDbId, filtered, 'vedomost_materialov', 'Таблица');
             totalFacts += filtered.length;
+            phase1LlmFacts += filtered.length;
           }
         }
       }
+
+      logger.logPhaseSummary('Фаза 1', {
+        ruleBasedBlocks: vedomostBlocks.length - vedomostNeedingLlm.length,
+        ruleBasedFacts: phase1RuleFacts,
+        llmBlocks: vedomostNeedingLlm.length,
+        llmFacts: phase1LlmFacts,
+      });
+      logger.addMaterialFacts(phase1RuleFacts + phase1LlmFacts);
 
       // ════════════════════════════════════════════════════════
       // ФАЗА 2: Спецификации
@@ -296,6 +332,7 @@ export function useExtraction(docId: string) {
 
       const specRuleResults = new Map<string, MaterialFactItem[]>();
       const specNeedingLlm: BlockForExtraction[] = [];
+      let phase2RuleFacts = 0;
 
       for (const bfe of specBlocks) {
         if (bfe.block.hasTable) {
@@ -310,6 +347,7 @@ export function useExtraction(docId: string) {
             specRuleResults.set(bfe.blockDbId, ruleItems);
             await saveFactsToDb(docId, bfe.blockDbId, ruleItems, 'spetsifikatsiya', bfe.blockTypeDisplay ?? 'Таблица');
             totalFacts += ruleItems.length;
+            phase2RuleFacts += ruleItems.length;
           }
 
           if (hasComplexTables || hasUnknownTables || ruleItems.length === 0) {
@@ -320,12 +358,15 @@ export function useExtraction(docId: string) {
         }
       }
 
+      let phase2LlmFacts = 0;
       if (specNeedingLlm.length > 0) {
         const llmSpec = await llmExtractBatch(
           specNeedingLlm,
           buildPromptWithGlossary(universalPrompt, glossaryMap),
           (completed, total) => setProgress(p => ({ ...p, completedBatches: completed, totalBatches: total })),
           model,
+          logger,
+          'Фаза 2',
         );
 
         setProgress(p => ({ ...p, status: 'merging', phase: 'Фаза 2: Сохранение спецификаций' }));
@@ -349,9 +390,18 @@ export function useExtraction(docId: string) {
           if (llmUnique.length > 0) {
             await saveFactsToDb(docId, blockDbId, llmUnique, 'spetsifikatsiya', blockTypeDisplay);
             totalFacts += llmUnique.length;
+            phase2LlmFacts += llmUnique.length;
           }
         }
       }
+
+      logger.logPhaseSummary('Фаза 2', {
+        ruleBasedBlocks: specBlocks.length - specNeedingLlm.length,
+        ruleBasedFacts: phase2RuleFacts,
+        llmBlocks: specNeedingLlm.length,
+        llmFacts: phase2LlmFacts,
+      });
+      logger.addMaterialFacts(phase2RuleFacts + phase2LlmFacts);
 
       // ════════════════════════════════════════════════════════
       // ФАЗА 2b: Спецификации сборок (assembly_spec)
@@ -361,6 +411,9 @@ export function useExtraction(docId: string) {
           ...p, status: 'rule_based', phase: 'Фаза 2b: Спецификации изделий',
           completedBatches: 0, totalBatches: assemblyBlocks.length, extractedFacts: totalFacts,
         }));
+
+        let phase2bMaterials = 0;
+        let phase2bProducts = 0;
 
         for (const bfe of assemblyBlocks) {
           const allMaterials: MaterialFactItem[] = [];
@@ -376,11 +429,22 @@ export function useExtraction(docId: string) {
           if (allMaterials.length > 0) {
             await saveFactsToDb(docId, bfe.blockDbId, allMaterials, 'assembly_spec', 'Таблица');
             totalFacts += allMaterials.length;
+            phase2bMaterials += allMaterials.length;
           }
           if (allProducts.length > 0) {
             await saveProductsToDb(docId, bfe.blockDbId, allProducts, 'assembly_spec');
+            phase2bProducts += allProducts.length;
           }
         }
+
+        logger.logPhaseSummary('Фаза 2b', {
+          ruleBasedBlocks: assemblyBlocks.length,
+          ruleBasedFacts: phase2bMaterials,
+          llmBlocks: 0,
+          llmFacts: 0,
+        });
+        logger.addMaterialFacts(phase2bMaterials);
+        logger.addProductFacts(phase2bProducts);
       }
 
       // ════════════════════════════════════════════════════════
@@ -397,11 +461,12 @@ export function useExtraction(docId: string) {
           buildPromptWithGlossary(universalPrompt, glossaryMap),
           undefined,
           model,
+          logger,
+          'Фаза 2c',
         );
 
+        let phase2cProducts = 0;
         for (const [blockDbId, items] of llmProducts) {
-          // LLM для vedomost_izdelij должна вернуть {"items": []} по правилу Type C.
-          // Если LLM всё же вернула элементы — сохраняем их как product_facts по mark/construction.
           const products: ProductFactItem[] = items
             .filter(i => i.source_snippet)
             .map(i => ({
@@ -418,8 +483,17 @@ export function useExtraction(docId: string) {
 
           if (products.length > 0) {
             await saveProductsToDb(docId, blockDbId, products, 'vedomost_izdelij');
+            phase2cProducts += products.length;
           }
         }
+
+        logger.logPhaseSummary('Фаза 2c', {
+          ruleBasedBlocks: 0,
+          ruleBasedFacts: 0,
+          llmBlocks: productListBlocks.length,
+          llmFacts: phase2cProducts,
+        });
+        logger.addProductFacts(phase2cProducts);
       }
 
       // ════════════════════════════════════════════════════════
@@ -430,14 +504,20 @@ export function useExtraction(docId: string) {
         completedBatches: 0, totalBatches: imageBlocks.length, extractedFacts: totalFacts,
       }));
 
+      let phase3Facts = 0;
+      let phase3ImagesWithUrl = 0;
+
       for (let i = 0; i < imageBlocks.length; i++) {
         const bfe = imageBlocks[i];
-        const items = await llmExtractImageBlock(bfe, layerCakePrompt, model);
+        if (bfe.imageUrl) phase3ImagesWithUrl++;
+
+        const items = await llmExtractImageBlock(bfe, layerCakePrompt, model, logger);
         const filtered = items.filter(item => item.source_snippet);
 
         if (filtered.length > 0) {
           await saveFactsToDb(docId, bfe.blockDbId, filtered, 'pirog', 'Изображение');
           totalFacts += filtered.length;
+          phase3Facts += filtered.length;
         }
 
         setProgress(p => ({ ...p, completedBatches: i + 1, extractedFacts: totalFacts }));
@@ -447,12 +527,28 @@ export function useExtraction(docId: string) {
         }
       }
 
+      logger.setImageStats(phase3ImagesWithUrl, imageBlocks.length);
+      logger.logPhaseSummary('Фаза 3', {
+        ruleBasedBlocks: 0,
+        ruleBasedFacts: 0,
+        llmBlocks: imageBlocks.length,
+        llmFacts: phase3Facts,
+      });
+      logger.addMaterialFacts(phase3Facts);
+
       // ── Финализация ──
       setProgress(p => ({ ...p, status: 'saving', phase: 'Сохранение' }));
 
+      const tokens = logger.getTokenUsage();
+
       await supabase
         .from('documents')
-        .update({ status: 'done' })
+        .update({
+          status: 'done',
+          prompt_tokens: tokens.prompt_tokens,
+          completion_tokens: tokens.completion_tokens,
+          total_tokens: tokens.total_tokens,
+        })
         .eq('id', docId);
 
       const totalBlocks = vedomostBlocks.length + specBlocks.length + assemblyBlocks.length + productListBlocks.length + imageBlocks.length;
@@ -463,7 +559,12 @@ export function useExtraction(docId: string) {
         totalBatches: totalBlocks,
         extractedFacts: totalFacts,
         errorMessage: null,
+        promptTokens: tokens.prompt_tokens,
+        completionTokens: tokens.completion_tokens,
+        totalTokens: tokens.total_tokens,
       });
+
+      logger.logFinalSummary();
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Extraction failed';

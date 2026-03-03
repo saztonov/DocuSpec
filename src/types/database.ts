@@ -34,6 +34,9 @@ export interface DbDocument {
   project_id: string | null;
   section_id: string | null;
   glossary_status: 'pending' | 'done' | 'skipped' | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
   created_at: string;
   updated_at: string;
 }

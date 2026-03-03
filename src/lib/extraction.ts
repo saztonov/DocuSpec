@@ -4,6 +4,7 @@ import { ExtractionResponseSchema, GlossaryResponseSchema } from '../types/extra
 import { classifyTable, isExtractableCategory } from './tableClassifier.ts';
 import { generateCanonicalKey } from './canonical.ts';
 import { callLlmJson, buildImageMessage } from './llm.ts';
+import type { ExtractionLogger } from './extractionLogger.ts';
 
 // ── Fallback prompts (used if DB prompts are unavailable) ──
 
@@ -462,6 +463,8 @@ export async function llmExtractBatch(
   systemPrompt: string,
   onProgress?: (completed: number, total: number) => void,
   model?: string,
+  logger?: ExtractionLogger,
+  phase?: string,
 ): Promise<Map<string, MaterialFactItem[]>> {
   const results = new Map<string, MaterialFactItem[]>();
 
@@ -488,6 +491,12 @@ export async function llmExtractBatch(
       }
 
       results.set(blockDbId, validItems);
+
+      logger?.logLlmCall(
+        block.uid, 'TEXT', phase ?? '',
+        Object.keys(parsed), validItems.length,
+        response.usage ?? null, response.hasImage, response.durationMs,
+      );
     } catch (err) {
       console.error(`LLM extraction failed for block ${block.uid}:`, err);
       results.set(blockDbId, []);
@@ -511,6 +520,7 @@ export async function llmExtractImageBlock(
   blockForExtraction: BlockForExtraction,
   systemPrompt: string,
   model?: string,
+  logger?: ExtractionLogger,
 ): Promise<MaterialFactItem[]> {
   const { block, pageNo, blockDbId, sectionContext, imageUrl } = blockForExtraction;
 
@@ -536,6 +546,12 @@ export async function llmExtractImageBlock(
     for (const item of validItems) {
       item.canonical_key = generateCanonicalKey(item.canonical_name || item.raw_name);
     }
+
+    logger?.logLlmCall(
+      block.uid, 'IMAGE', 'Фаза 3',
+      Object.keys(parsed), validItems.length,
+      response.usage ?? null, !!imageUrl, response.durationMs,
+    );
 
     return validItems;
   } catch (err) {
@@ -645,11 +661,13 @@ export async function llmExtractGlossary(
   contentChunks: string[],
   systemPrompt: string,
   model?: string,
+  logger?: ExtractionLogger,
 ): Promise<GlossaryItem[]> {
   const allItems: GlossaryItem[] = [];
   const seenCodes = new Set<string>();
 
-  for (const chunk of contentChunks) {
+  for (let ci = 0; ci < contentChunks.length; ci++) {
+    const chunk = contentChunks[ci];
     try {
       const response = await callLlmJson({
         messages: [
@@ -663,17 +681,25 @@ export async function llmExtractGlossary(
       const parsed = JSON.parse(response.content);
       const validated = GlossaryResponseSchema.parse(parsed);
 
+      let chunkNewCodes = 0;
       for (const item of validated.glossary) {
         if (!seenCodes.has(item.code)) {
           seenCodes.add(item.code);
           allItems.push(item);
+          chunkNewCodes++;
         }
       }
+
+      logger?.logLlmCall(
+        `chunk_${ci + 1}/${contentChunks.length}`, 'glossary', 'Pass 0',
+        Object.keys(parsed), chunkNewCodes,
+        response.usage ?? null, false, response.durationMs,
+      );
     } catch (err) {
       console.error('Glossary extraction chunk failed:', err);
     }
 
-    if (contentChunks.indexOf(chunk) < contentChunks.length - 1) {
+    if (ci < contentChunks.length - 1) {
       await new Promise(resolve => setTimeout(resolve, 300));
     }
   }

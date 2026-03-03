@@ -47,6 +47,8 @@ export interface LlmJsonResponse {
   content: string;
   model: string;
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  durationMs: number;
+  hasImage: boolean;
 }
 
 const MAX_RATE_LIMIT_RETRIES = 5;
@@ -61,6 +63,11 @@ const INITIAL_BACKOFF_MS = 2000;
 export async function callLlmJson(options: LlmOptions): Promise<LlmJsonResponse> {
   const { messages, temperature = 0.1, timeoutMs = 60000, model } = options;
   const effectiveModel = model || getModel();
+
+  const hasImage = messages.some(
+    m => Array.isArray(m.content) && m.content.some(p => p.type === 'image_url'),
+  );
+  const callStart = Date.now();
 
   let rateLimitRetries = 0;
   let lastError: Error | null = null;
@@ -115,10 +122,13 @@ export async function callLlmJson(options: LlmOptions): Promise<LlmJsonResponse>
         throw new Error('No content in LLM response');
       }
 
+      const durationMs = Date.now() - callStart;
       return {
         content: choice.message.content,
         model: data.model || effectiveModel,
         usage: data.usage,
+        durationMs,
+        hasImage,
       };
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));

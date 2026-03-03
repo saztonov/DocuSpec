@@ -423,6 +423,33 @@
               "position": 18,
               "max_length": null,
               "numeric_precision": null
+            },
+            {
+              "name": "prompt_tokens",
+              "type": "integer",
+              "default": "0",
+              "nullable": true,
+              "position": 19,
+              "max_length": null,
+              "numeric_precision": 32
+            },
+            {
+              "name": "completion_tokens",
+              "type": "integer",
+              "default": "0",
+              "nullable": true,
+              "position": 20,
+              "max_length": null,
+              "numeric_precision": 32
+            },
+            {
+              "name": "total_tokens",
+              "type": "integer",
+              "default": "0",
+              "nullable": true,
+              "position": 21,
+              "max_length": null,
+              "numeric_precision": 32
             }
           ]
         },
@@ -1454,7 +1481,7 @@
           ]
         }
       ],
-      "generated_at": "2026-03-03T11:36:28.660731+00:00",
+      "generated_at": "2026-03-03T13:36:08.651197+00:00",
       "primary_keys": [
         {
           "columns": [

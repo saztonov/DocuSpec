@@ -77,4 +77,7 @@ export interface ExtractionProgress {
   totalBatches: number;
   extractedFacts: number;
   errorMessage: string | null;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
 }

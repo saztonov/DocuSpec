@@ -631,7 +631,14 @@ function ExtractionProgress({ docId, onComplete, selectedModel, onModelChange }:
       )}
 
       {progress.status === 'done' && (
-        <Text type="success">{statusText.done}</Text>
+        <>
+          <Text type="success">{statusText.done}</Text>
+          {progress.totalTokens && progress.totalTokens > 0 && (
+            <Text type="secondary" style={{ marginLeft: 8 }}>
+              | Токены: {(progress.promptTokens ?? 0).toLocaleString('ru-RU')} вход + {(progress.completionTokens ?? 0).toLocaleString('ru-RU')} выход = {progress.totalTokens.toLocaleString('ru-RU')}
+            </Text>
+          )}
+        </>
       )}
 
       {progress.status === 'error' && (
@@ -767,6 +774,11 @@ export default function DocumentPage() {
         {document.model_used && (
           <Descriptions.Item label="Модель распознавания">
             <Tag color="blue">{document.model_used}</Tag>
+          </Descriptions.Item>
+        )}
+        {document.total_tokens > 0 && (
+          <Descriptions.Item label="Токены LLM">
+            {document.prompt_tokens.toLocaleString('ru-RU')} вход + {document.completion_tokens.toLocaleString('ru-RU')} выход = {document.total_tokens.toLocaleString('ru-RU')}
           </Descriptions.Item>
         )}
       </Descriptions>
