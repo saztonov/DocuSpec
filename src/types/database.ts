@@ -57,6 +57,7 @@ export interface DbDocBlock {
   has_error: boolean;
   error_text: string | null;
   section_title: string | null;
+  image_url: string | null;
   created_at: string;
 }
 
@@ -75,6 +76,10 @@ export interface DbMaterialFact {
   note: string | null;
   source_snippet: string | null;
   table_category: string | null;
+  source_section: string | null;
+  construction: string | null;
+  extra_params: string | null;
+  block_type_display: string | null;
   confidence: number;
   user_verified: boolean;
   created_at: string;
@@ -114,4 +119,17 @@ export interface DbBomSummary {
   fact_count: number;
   source_block_ids: string[];
   all_verified: boolean;
+  source_block_display_types: string[] | null;
+}
+
+export interface DbLlmPrompt {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  system_prompt: string;
+  default_system_prompt: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 }

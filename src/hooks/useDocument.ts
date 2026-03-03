@@ -12,22 +12,59 @@ function readFileAsText(file: File): Promise<string> {
   });
 }
 
+/**
+ * Parse _result.json companion file and extract image URLs by block UID.
+ * URLs are found in ocr_html field as href="https://..." for IMAGE blocks.
+ */
+function parseImageUrlsFromJson(jsonText: string): Map<string, string> {
+  const map = new Map<string, string>();
+  try {
+    const data = JSON.parse(jsonText);
+    const blocks: unknown[] = Array.isArray(data) ? data : (data?.blocks ?? data?.pages?.flatMap((p: { blocks?: unknown[] }) => p.blocks ?? []) ?? []);
+    for (const block of blocks) {
+      if (typeof block !== 'object' || !block) continue;
+      const b = block as Record<string, unknown>;
+      const uid = typeof b['block_uid'] === 'string' ? b['block_uid'] : null;
+      const blockType = typeof b['block_type'] === 'string' ? b['block_type'] : '';
+      const ocrHtml = typeof b['ocr_html'] === 'string' ? b['ocr_html'] : '';
+      if (!uid || blockType.toUpperCase() !== 'IMAGE' || !ocrHtml) continue;
+      const match = ocrHtml.match(/href="(https:\/\/[^"]+)"/);
+      if (match) {
+        map.set(uid, match[1]);
+      }
+    }
+  } catch {
+    // Ignore JSON parse errors — treat as no images
+  }
+  return map;
+}
+
 export function useDocument() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function uploadDocument(file: File, options?: { projectId?: string; sectionId?: string }): Promise<string> {
+  async function uploadDocument(
+    file: File,
+    options?: { projectId?: string; sectionId?: string; jsonFile?: File },
+  ): Promise<string> {
     setLoading(true);
     setError(null);
 
     try {
-      // 1. Read file as text
+      // 1. Read MD file
       const mdText = await readFileAsText(file);
 
-      // 2. Parse with parseDocument
+      // 2. Parse JSON companion if provided
+      let imageUrlMap = new Map<string, string>();
+      if (options?.jsonFile) {
+        const jsonText = await readFileAsText(options.jsonFile);
+        imageUrlMap = parseImageUrlsFromJson(jsonText);
+      }
+
+      // 3. Parse document
       const parsed = parseDocument(mdText);
 
-      // 3. Insert document record with status='parsing'
+      // 4. Insert document record with status='parsing'
       const { data: docData, error: docError } = await supabase
         .from('documents')
         .insert({
@@ -53,7 +90,7 @@ export function useDocument() {
 
       const docId: string = docData.id;
 
-      // 5 & 6. Insert pages and blocks
+      // 5. Insert pages and blocks
       let totalBlockCount = 0;
       let errorBlockCount = 0;
 
@@ -76,6 +113,8 @@ export function useDocument() {
         const pageId: string = pageData.id;
 
         for (const block of page.blocks) {
+          const imageUrl = imageUrlMap.get(block.uid) ?? null;
+
           const { error: blockError } = await supabase
             .from('doc_blocks')
             .insert({
@@ -88,6 +127,7 @@ export function useDocument() {
               has_error: block.hasError,
               error_text: block.errorText,
               section_title: block.sectionTitle,
+              image_url: imageUrl,
             });
 
           if (blockError) {
@@ -99,7 +139,7 @@ export function useDocument() {
         }
       }
 
-      // 7. Update document with final counts and status
+      // 6. Update document with final counts and status
       const finalStatus: DocumentStatus = errorBlockCount > 0 ? 'has_errors' : 'done';
 
       const { error: updateError } = await supabase
@@ -116,7 +156,6 @@ export function useDocument() {
         throw new Error(`Document update failed: ${updateError.message}`);
       }
 
-      // 8. Return the document id
       return docId;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown upload error';

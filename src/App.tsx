@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { ConfigProvider, Layout, Typography, Menu, App as AntApp } from 'antd';
-import { FileSearchOutlined, ProfileOutlined, SettingOutlined } from '@ant-design/icons';
+import { FileSearchOutlined, SettingOutlined } from '@ant-design/icons';
 import ruRU from 'antd/locale/ru_RU';
 import HomePage from './pages/HomePage.tsx';
 import DocumentPage from './pages/DocumentPage.tsx';
@@ -15,22 +15,15 @@ function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const selectedKey = location.pathname.startsWith('/statements')
-    ? '/statements'
-    : location.pathname.startsWith('/admin')
-      ? '/admin'
-      : '/';
+  const selectedKey = location.pathname.startsWith('/admin')
+    ? '/admin'
+    : '/';
 
   const menuItems = [
     {
       key: '/',
       icon: <FileSearchOutlined />,
       label: 'Распознавание',
-    },
-    {
-      key: '/statements',
-      icon: <ProfileOutlined />,
-      label: 'Ведомости',
     },
     {
       key: '/admin',

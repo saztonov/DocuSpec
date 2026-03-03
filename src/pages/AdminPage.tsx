@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Typography, Tabs, Table, Button, Space, Modal, Form, Input, InputNumber, Popconfirm, App } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Typography, Tabs, Table, Button, Space, Modal, Form, Input, InputNumber, Popconfirm, App, Tag } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons';
 import { useProjects } from '../hooks/useProjects.ts';
 import { useSections } from '../hooks/useSections.ts';
-import type { DbProject, DbSection } from '../types/database.ts';
+import { usePrompts } from '../hooks/usePrompts.ts';
+import type { DbProject, DbSection, DbLlmPrompt } from '../types/database.ts';
 
 const { Title } = Typography;
 
@@ -209,10 +210,105 @@ function SectionsTab() {
   );
 }
 
+// ── PromptsTab ──
+function PromptsTab() {
+  const { prompts, loading, updatePrompt, resetPrompt } = usePrompts();
+  const { message } = App.useApp();
+  const [editingPrompt, setEditingPrompt] = useState<DbLlmPrompt | null>(null);
+  const [form] = Form.useForm();
+
+  function openEdit(record: DbLlmPrompt) {
+    setEditingPrompt(record);
+    form.setFieldsValue({ name: record.name, description: record.description, system_prompt: record.system_prompt });
+  }
+
+  async function handleSave() {
+    try {
+      const values = await form.validateFields();
+      if (!editingPrompt) return;
+      const { error } = await updatePrompt(editingPrompt.id, values);
+      if (error) throw error;
+      message.success('Промпт обновлён');
+      setEditingPrompt(null);
+    } catch (err) {
+      if (err instanceof Error) message.error(err.message);
+    }
+  }
+
+  async function handleReset(id: string) {
+    const { error } = await resetPrompt(id);
+    if (error) { message.error('Нет дефолтного промпта'); }
+    else { message.success('Промпт сброшен к дефолту'); }
+  }
+
+  const columns = [
+    { title: 'Ключ', dataIndex: 'key', key: 'key', width: 200, render: (v: string) => <Tag color="blue">{v}</Tag> },
+    { title: 'Название', dataIndex: 'name', key: 'name', width: 220 },
+    { title: 'Описание', dataIndex: 'description', key: 'description', ellipsis: true, render: (v: string | null) => v ?? '—' },
+    {
+      title: 'Обновлён', dataIndex: 'updated_at', key: 'updated_at', width: 160,
+      render: (v: string) => new Date(v).toLocaleString('ru-RU'),
+    },
+    {
+      title: 'Действия', key: 'actions', width: 130,
+      render: (_: unknown, record: DbLlmPrompt) => (
+        <Space>
+          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
+          <Popconfirm
+            title="Сбросить промпт к дефолту?"
+            description="Все ваши правки будут потеряны."
+            onConfirm={() => void handleReset(record.id)}
+            okText="Да"
+            cancelText="Нет"
+            disabled={!record.default_system_prompt}
+          >
+            <Button size="small" icon={<UndoOutlined />} disabled={!record.default_system_prompt} />
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <Table
+        dataSource={prompts.map(p => ({ ...p, key: p.id }))}
+        columns={columns}
+        size="small"
+        loading={loading}
+        pagination={false}
+        locale={{ emptyText: 'Промпты не загружены' }}
+      />
+      <Modal
+        title={`Редактировать промпт: ${editingPrompt?.name}`}
+        open={!!editingPrompt}
+        onOk={() => void handleSave()}
+        onCancel={() => setEditingPrompt(null)}
+        okText="Сохранить"
+        cancelText="Отмена"
+        width={800}
+      >
+        <Form form={form} layout="vertical">
+          <Form.Item name="name" label="Название">
+            <Input />
+          </Form.Item>
+          <Form.Item name="description" label="Описание">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="system_prompt" label="Системный промпт" rules={[{ required: true, message: 'Введите промпт' }]}>
+            <Input.TextArea rows={22} style={{ fontFamily: 'monospace', fontSize: 12 }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
+  );
+}
+
 export default function AdminPage() {
   const items = [
     { key: 'projects', label: 'Объекты', children: <ProjectsTab /> },
     { key: 'sections', label: 'Разделы', children: <SectionsTab /> },
+    { key: 'prompts', label: 'Промпты LLM', children: <PromptsTab /> },
   ];
 
   return (

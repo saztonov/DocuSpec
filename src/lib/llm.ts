@@ -14,9 +14,26 @@ function getModel(): string {
   return (import.meta.env.VITE_OPENROUTER_MODEL as string) || 'anthropic/claude-sonnet-4';
 }
 
+export type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export interface LlmMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | ContentPart[];
+}
+
+/**
+ * Формирует user-сообщение с изображением (по URL) и текстом.
+ */
+export function buildImageMessage(imageUrl: string, textPrompt: string): LlmMessage {
+  return {
+    role: 'user',
+    content: [
+      { type: 'image_url', image_url: { url: imageUrl } },
+      { type: 'text', text: textPrompt },
+    ],
+  };
 }
 
 export interface LlmOptions {

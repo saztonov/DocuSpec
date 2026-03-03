@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Typography, Upload, Space, Table, Tag, App, Divider, Select, Row, Col, Button, Popconfirm } from 'antd';
-import { InboxOutlined, FileTextOutlined, DeleteOutlined } from '@ant-design/icons';
+import { InboxOutlined, FileTextOutlined, DeleteOutlined, FileJsonOutlined, UploadOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase.ts';
 import { useDocument } from '../hooks/useDocument.ts';
 import { useProjects } from '../hooks/useProjects.ts';
@@ -10,12 +10,6 @@ import type { DbDocument } from '../types/database.ts';
 
 const { Title, Text } = Typography;
 const { Dragger } = Upload;
-
-interface CustomRequestOptions {
-  file: File | Blob | string;
-  onSuccess?: (body: unknown) => void;
-  onError?: (err: Error) => void;
-}
 
 const STATUS_COLOR: Record<string, string> = {
   uploaded: 'default',
@@ -45,8 +39,11 @@ export default function HomePage() {
   const { sections, loading: loadingSections } = useSections();
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
   const [selectedSectionId, setSelectedSectionId] = useState<string>();
+  const [pendingMdFile, setPendingMdFile] = useState<File | null>(null);
+  const [pendingJsonFile, setPendingJsonFile] = useState<File | null>(null);
 
   const canUpload = !!selectedProjectId && !!selectedSectionId;
+  const canSubmit = canUpload && !!pendingMdFile;
 
   useEffect(() => {
     async function loadDocs() {
@@ -61,21 +58,21 @@ export default function HomePage() {
     void loadDocs();
   }, []);
 
-  async function handleUpload(options: CustomRequestOptions) {
-    const file = options.file as File;
-
+  async function handleSubmit() {
+    if (!pendingMdFile) return;
     try {
-      const docId = await uploadDocument(file, {
+      const docId = await uploadDocument(pendingMdFile, {
         projectId: selectedProjectId,
         sectionId: selectedSectionId,
+        jsonFile: pendingJsonFile ?? undefined,
       });
-      message.success(`Документ "${file.name}" загружен`);
-      options.onSuccess?.(docId);
+      message.success(`Документ "${pendingMdFile.name}" загружен`);
+      setPendingMdFile(null);
+      setPendingJsonFile(null);
       navigate(`/doc/${docId}`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Ошибка загрузки';
       message.error(errorMessage);
-      options.onError?.(err instanceof Error ? err : new Error(errorMessage));
     }
   }
 
@@ -205,25 +202,86 @@ export default function HomePage() {
         </Col>
       </Row>
 
+      {/* MD file */}
       <Dragger
         accept=".md"
         multiple={false}
         showUploadList={false}
-        customRequest={handleUpload}
-        disabled={uploading || !canUpload}
+        beforeUpload={(file) => {
+          setPendingMdFile(file);
+          return false;
+        }}
+        disabled={!canUpload}
       >
         <p className="ant-upload-drag-icon">
           <InboxOutlined />
         </p>
-        <p className="ant-upload-text">
-          {canUpload
-            ? 'Нажмите или перетащите .md файл для загрузки'
-            : 'Сначала выберите проект и раздел'}
-        </p>
-        <p className="ant-upload-hint">
-          Поддерживаются файлы Markdown с разметкой строительной документации
-        </p>
+        {pendingMdFile ? (
+          <p className="ant-upload-text">
+            <FileTextOutlined style={{ marginRight: 6 }} />
+            {pendingMdFile.name}
+          </p>
+        ) : (
+          <p className="ant-upload-text">
+            {canUpload
+              ? 'Нажмите или перетащите .md файл'
+              : 'Сначала выберите проект и раздел'}
+          </p>
+        )}
+        <p className="ant-upload-hint">Markdown-файл строительной документации</p>
       </Dragger>
+
+      {/* JSON companion file */}
+      <div style={{ border: '1px dashed #d9d9d9', borderRadius: 8, padding: '12px 16px', background: '#fafafa' }}>
+        <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Space>
+            <FileJsonOutlined style={{ color: '#8c8c8c', fontSize: 20 }} />
+            <div>
+              <Text strong style={{ color: '#595959' }}>JSON с изображениями (опционально)</Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {pendingJsonFile
+                  ? pendingJsonFile.name
+                  : 'Файл _result.json с ссылками на изображения блоков из S3/R2'}
+              </Text>
+            </div>
+          </Space>
+          <Space>
+            {pendingJsonFile && (
+              <Button
+                size="small"
+                icon={<CloseCircleOutlined />}
+                onClick={() => setPendingJsonFile(null)}
+              />
+            )}
+            <Upload
+              accept=".json"
+              multiple={false}
+              showUploadList={false}
+              beforeUpload={(file) => {
+                setPendingJsonFile(file);
+                return false;
+              }}
+            >
+              <Button icon={<UploadOutlined />} size="small">
+                {pendingJsonFile ? 'Заменить' : 'Выбрать'}
+              </Button>
+            </Upload>
+          </Space>
+        </Space>
+      </div>
+
+      <Button
+        type="primary"
+        size="large"
+        icon={<UploadOutlined />}
+        loading={uploading}
+        disabled={!canSubmit || uploading}
+        onClick={() => void handleSubmit()}
+        block
+      >
+        Загрузить{pendingJsonFile ? ' (MD + JSON)' : ' MD'}
+      </Button>
 
       {documents.length > 0 && (
         <>

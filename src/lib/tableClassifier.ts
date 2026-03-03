@@ -19,10 +19,30 @@ function isQtyHeader(col: string): boolean {
 export function classifyTable(table: ParsedTable): TableCategory {
   const h = table.headers.map(s => s.toLowerCase().trim());
   const joined = h.join(' ');
+  const sectionLower = (table.sectionContext || '').toLowerCase();
 
   // Change log tables — skip
   if (h.some(x => x.includes('изм')) && h.some(x => x.includes('подп') || x.includes('дата'))) {
     return 'change_log';
+  }
+
+  // Сводная ведомость материалов / Ведомость материалов — detect by section context first
+  if (
+    sectionLower.includes('ведомость материалов') ||
+    sectionLower.includes('сводная ведомость материалов')
+  ) {
+    return 'vedomost_materialov';
+  }
+
+  // Ведомость изделий / Ведомость ограждений — assemblies, not individual materials
+  if (
+    sectionLower.includes('ведомость изделий') ||
+    sectionLower.includes('ведомость ограждений') ||
+    sectionLower.includes('ведомость заполнен') ||
+    sectionLower.includes('ведомость дверей') ||
+    sectionLower.includes('ведомость окон')
+  ) {
+    return 'vedomost_izdelij';
   }
 
   // Room schedule — skip (экспликация помещений)
@@ -42,7 +62,6 @@ export function classifyTable(table: ParsedTable): TableCategory {
     isQtyHeader(x) ||
     x.includes('объем') || x.includes('объём') || x.includes('площадь')
   );
-  const sectionLower = (table.sectionContext || '').toLowerCase();
   const isRefByContext = sectionLower.includes('ссылочн') || sectionLower.includes('прилагаем') ||
     sectionLower.includes('нормативн');
 
@@ -145,5 +164,13 @@ export function classifyTable(table: ParsedTable): TableCategory {
  */
 export function isExtractableCategory(category: TableCategory): boolean {
   return category !== 'change_log' && category !== 'room_schedule' &&
-    category !== 'reference_docs' && category !== 'drawing_list';
+    category !== 'reference_docs' && category !== 'drawing_list' &&
+    category !== 'vedomost_izdelij';
+}
+
+/**
+ * Check if a category is a "ведомость материалов" (highest priority, phase 1).
+ */
+export function isVedomostMaterialov(category: TableCategory): boolean {
+  return category === 'vedomost_materialov' || category === 'material_qty';
 }

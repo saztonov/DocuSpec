@@ -13,7 +13,11 @@ import {
   Progress,
   App,
   Select,
+  Collapse,
+  Empty,
 } from 'antd';
+
+const { Panel } = Collapse;
 import {
   FileTextOutlined,
   ExperimentOutlined,
@@ -185,8 +189,8 @@ function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[]
   );
 }
 
-// ── MaterialFactTable with inline editing ──
-function MaterialFactTable({ docId }: { docId: string }) {
+// ── MaterialsTab ──
+function MaterialsTab({ docId }: { docId: string }) {
   const [facts, setFacts] = useState<DbMaterialFact[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -206,42 +210,28 @@ function MaterialFactTable({ docId }: { docId: string }) {
 
   useEffect(() => { void loadFacts(); }, [docId]);
 
-  function startEdit(record: DbMaterialFact) {
-    setEditingKey(record.id);
-    setEditValue(record.canonical_name || record.raw_name);
-  }
-
   async function saveEdit(id: string) {
     const newKey = generateCanonicalKey(editValue);
     const { error } = await supabase
       .from('material_facts')
       .update({ canonical_name: editValue, canonical_key: newKey, updated_at: new Date().toISOString() })
       .eq('id', id);
-
-    if (error) {
-      msg.error('Ошибка сохранения');
-    } else {
+    if (error) { msg.error('Ошибка сохранения'); }
+    else {
       msg.success('Сохранено');
-      setFacts(prev => prev.map(f =>
-        f.id === id ? { ...f, canonical_name: editValue, canonical_key: newKey } : f
-      ));
+      setFacts(prev => prev.map(f => f.id === id ? { ...f, canonical_name: editValue, canonical_key: newKey } : f));
     }
     setEditingKey(null);
   }
 
   const columns = [
+    { title: 'Конструкция', dataIndex: 'construction', key: 'construction', width: 150, ellipsis: true, render: (v: string | null) => v ?? '—' },
     {
-      title: '№',
-      key: 'rowNum',
-      width: 50,
-      render: (_: unknown, __: unknown, index: number) => index + 1,
-    },
-    { title: 'Наименование', dataIndex: 'raw_name', key: 'raw_name', width: 250, ellipsis: true },
-    {
-      title: 'Канон. имя',
+      title: 'Материал',
       dataIndex: 'canonical_name',
       key: 'canonical_name',
-      width: 250,
+      width: 240,
+      ellipsis: true,
       render: (val: string, record: DbMaterialFact) => {
         if (editingKey === record.id) {
           return (
@@ -259,58 +249,67 @@ function MaterialFactTable({ docId }: { docId: string }) {
           );
         }
         return (
-          <Text
-            style={{ cursor: 'pointer' }}
-            onClick={() => startEdit(record)}
-            title="Нажмите для редактирования"
-          >
+          <Text style={{ cursor: 'pointer' }} onClick={() => { setEditingKey(record.id); setEditValue(val || record.raw_name); }} title="Нажмите для редактирования">
             {val || <Text type="secondary" italic>—</Text>}
           </Text>
         );
       },
     },
-    { title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 90 },
-    { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 60 },
-    { title: 'Марка', dataIndex: 'mark', key: 'mark', width: 100, ellipsis: true },
-    { title: 'ГОСТ', dataIndex: 'gost', key: 'gost', width: 130, ellipsis: true },
+    { title: 'Доп. пар.', dataIndex: 'extra_params', key: 'extra_params', width: 110, ellipsis: true, render: (v: string | null) => v ?? '—' },
+    { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 55 },
+    { title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 75, render: (v: number | null) => v ?? '—' },
+    { title: 'Марка / ГОСТ', key: 'mark_gost', width: 130, ellipsis: true, render: (_: unknown, r: DbMaterialFact) => [r.mark, r.gost].filter(Boolean).join(' / ') || '—' },
+    { title: 'Блок', dataIndex: 'block_id', key: 'block_id', width: 130, render: (v: string) => <BlockLink blockId={v} /> },
+    { title: 'Примечание', dataIndex: 'note', key: 'note', width: 140, ellipsis: true, render: (v: string | null) => v ?? '—' },
     {
-      title: 'Блок',
-      dataIndex: 'block_id',
-      key: 'block_id',
-      width: 130,
-      render: (v: string) => <BlockLink blockId={v} />,
-    },
-    {
-      title: 'Источник',
-      dataIndex: 'source_snippet',
-      key: 'source_snippet',
-      width: 200,
-      ellipsis: true,
-      render: (v: string) => v ? <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text> : '-',
-    },
-    {
-      title: 'Уверенность',
-      dataIndex: 'confidence',
-      key: 'confidence',
-      width: 90,
-      render: (v: number) => {
-        const pct = Math.round(v * 100);
-        const color = pct >= 80 ? 'green' : pct >= 50 ? 'orange' : 'red';
-        return <Tag color={color}>{pct}%</Tag>;
-      },
+      title: 'Увер.', dataIndex: 'confidence', key: 'confidence', width: 70,
+      render: (v: number) => { const pct = Math.round(v * 100); return <Tag color={pct >= 80 ? 'green' : pct >= 50 ? 'orange' : 'red'}>{pct}%</Tag>; },
     },
   ];
 
+  if (loading) return <Spin />;
+  if (facts.length === 0) return <Empty description="Материалы ещё не извлечены. Нажмите «Собрать ведомость»." />;
+
+  const vedomostFacts = facts.filter(f => f.source_section === 'vedomost_materialov');
+  const specFacts = facts.filter(f => f.source_section === 'spetsifikatsiya');
+  const pirogFacts = facts.filter(f => f.source_section === 'pirog');
+  const otherFacts = facts.filter(f => !f.source_section);
+
+  function renderSection(title: string, sectionFacts: DbMaterialFact[]) {
+    if (sectionFacts.length === 0) return null;
+    const groups = new Map<string, DbMaterialFact[]>();
+    for (const f of sectionFacts) {
+      const key = f.block_id;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(f);
+    }
+    return (
+      <div style={{ marginBottom: 24 }}>
+        <Title level={5} style={{ marginBottom: 8 }}>{title} <Tag>{sectionFacts.length} поз.</Tag></Title>
+        <Collapse defaultActiveKey={[...groups.keys()].slice(0, 3)}>
+          {[...groups.entries()].map(([blockId, groupFacts]) => {
+            const firstFact = groupFacts[0];
+            const headerLabel = firstFact?.construction
+              ? firstFact.construction
+              : <Text type="secondary" code style={{ fontSize: 12 }}>{blockId.slice(0, 12)}…</Text>;
+            return (
+              <Panel key={blockId} header={<Space>{headerLabel}<Tag color="default">{groupFacts.length} поз.</Tag></Space>}>
+                <Table dataSource={groupFacts.map(f => ({ ...f, key: f.id }))} columns={columns} size="small" pagination={false} scroll={{ x: 1100 }} />
+              </Panel>
+            );
+          })}
+        </Collapse>
+      </div>
+    );
+  }
+
   return (
-    <Table
-      dataSource={facts.map((f) => ({ ...f, key: f.id }))}
-      columns={columns}
-      size="small"
-      loading={loading}
-      pagination={{ defaultPageSize: 30 }}
-      scroll={{ x: 1100 }}
-      locale={{ emptyText: 'Материалы ещё не извлечены. Нажмите "Собрать ведомость".' }}
-    />
+    <div>
+      {renderSection('Ведомости материалов', vedomostFacts)}
+      {renderSection('Спецификации', specFacts)}
+      {renderSection('Пироги конструкций', pirogFacts)}
+      {renderSection('Прочее', otherFacts)}
+    </div>
   );
 }
 
@@ -407,6 +406,8 @@ function BomView({ docId, filename, modelUsed, projectId, sectionId }: { docId: 
     return <Alert type="error" message="Ошибка загрузки ведомости" description={error} />;
   }
 
+  const BLOCK_TYPE_COLOR: Record<string, string> = { 'Таблица': 'cyan', 'Текст': 'blue', 'Изображение': 'purple' };
+
   const columns = [
     {
       title: '№',
@@ -426,6 +427,22 @@ function BomView({ docId, filename, modelUsed, projectId, sectionId }: { docId: 
     },
     { title: 'Источников', dataIndex: 'fact_count', key: 'fact_count', width: 100 },
     {
+      title: 'Тип блока',
+      dataIndex: 'source_block_display_types',
+      key: 'source_block_display_types',
+      width: 160,
+      render: (types: string[] | null) => {
+        if (!types || types.length === 0) return '—';
+        return (
+          <Space size={4} wrap>
+            {types.filter(Boolean).map(t => (
+              <Tag key={t} color={BLOCK_TYPE_COLOR[t] ?? 'default'}>{t}</Tag>
+            ))}
+          </Space>
+        );
+      },
+    },
+    {
       title: 'Проверены',
       dataIndex: 'all_verified',
       key: 'all_verified',
@@ -435,7 +452,7 @@ function BomView({ docId, filename, modelUsed, projectId, sectionId }: { docId: 
   ];
 
   return (
-    <Space orientation="vertical" style={{ width: '100%' }}>
+    <Space direction="vertical" style={{ width: '100%' }}>
       {bomLines.length > 0 && (
         <Space>
           <Button icon={<SaveOutlined />} type="primary" onClick={() => void saveStatement()} loading={saving}>
@@ -506,11 +523,12 @@ function ExtractionProgress({ docId, onComplete, selectedModel, onModelChange }:
     }
   }
 
-  const statusLabels: Record<string, string> = {
+  const phaseLabel = progress.phase ? ` — ${progress.phase}` : '';
+  const statusText: Record<string, string> = {
     idle: 'Готов к запуску',
-    rule_based: 'Извлечение из таблиц (правила)...',
-    llm_extracting: `LLM-извлечение (${progress.completedBatches}/${progress.totalBatches})...`,
-    merging: 'Объединение результатов...',
+    rule_based: `Извлечение из таблиц (правила)${phaseLabel}...`,
+    llm_extracting: `LLM-извлечение (${progress.completedBatches}/${progress.totalBatches})${phaseLabel}...`,
+    merging: `Объединение результатов${phaseLabel}...`,
     saving: 'Сохранение...',
     done: `Готово: ${progress.extractedFacts} материалов`,
     error: progress.errorMessage ?? 'Ошибка',
@@ -550,15 +568,15 @@ function ExtractionProgress({ docId, onComplete, selectedModel, onModelChange }:
 
       {isRunning && (
         <div>
-          <Text type="secondary">{statusLabels[progress.status]}</Text>
-          {progress.status === 'llm_extracting' && (
+          <Text type="secondary">{statusText[progress.status]}</Text>
+          {(progress.status === 'llm_extracting' || progress.status === 'rule_based') && progress.totalBatches > 0 && (
             <Progress percent={percent} size="small" style={{ marginTop: 8 }} />
           )}
         </div>
       )}
 
       {progress.status === 'done' && (
-        <Text type="success">{statusLabels.done}</Text>
+        <Text type="success">{statusText.done}</Text>
       )}
 
       {progress.status === 'error' && (
@@ -646,7 +664,7 @@ export default function DocumentPage() {
           <ExperimentOutlined /> Материалы
         </span>
       ),
-      children: <MaterialFactTable docId={document.id} />,
+      children: <MaterialsTab docId={document.id} />,
     },
     {
       key: 'bom',
@@ -660,7 +678,7 @@ export default function DocumentPage() {
   ];
 
   return (
-    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Title level={3}>{document.filename}</Title>
 
       <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>

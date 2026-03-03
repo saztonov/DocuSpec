@@ -4,6 +4,8 @@ export const MaterialFactItemSchema = z.object({
   raw_name: z.string().min(1),
   canonical_name: z.string().nullable(),
   canonical_key: z.string().nullable(),
+  construction: z.string().nullable().optional(),
+  extra_params: z.string().nullable().optional(),
   quantity: z.number().nullable(),
   unit: z.string().nullable(),
   mark: z.string().nullable(),
@@ -31,10 +33,13 @@ export type TableCategory =
   | 'change_log'
   | 'reference_docs'
   | 'drawing_list'
+  | 'vedomost_materialov'
+  | 'vedomost_izdelij'
   | 'unknown';
 
 export interface ExtractionProgress {
   status: 'idle' | 'rule_based' | 'llm_extracting' | 'merging' | 'saving' | 'done' | 'error';
+  phase?: string;
   completedBatches: number;
   totalBatches: number;
   extractedFacts: number;

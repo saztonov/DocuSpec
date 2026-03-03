@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Typography, Spin } from 'antd';
+import { Typography, Spin, Modal, Image } from 'antd';
 import { supabase } from '../lib/supabase.ts';
 import BlockTableModal from './BlockTableModal.tsx';
 import type { DbDocBlock } from '../types/database.ts';
@@ -32,6 +32,9 @@ export default function BlockLink({ blockId }: { blockId: string }) {
 
   if (loading) return <Spin size="small" />;
 
+  const isImage = block?.block_type === 'IMAGE';
+  const hasImageUrl = isImage && !!block?.image_url;
+
   return (
     <>
       <Text
@@ -42,7 +45,27 @@ export default function BlockLink({ blockId }: { blockId: string }) {
       >
         {block?.block_uid ?? blockId.slice(0, 8) + '...'}
       </Text>
-      {showModal && block && (
+
+      {showModal && block && hasImageUrl && (
+        <Modal
+          open
+          onCancel={() => setShowModal(false)}
+          footer={null}
+          width="90vw"
+          title={block.block_uid}
+          style={{ top: 20 }}
+        >
+          <div style={{ textAlign: 'center' }}>
+            <Image
+              src={block.image_url!}
+              alt={block.block_uid}
+              style={{ maxWidth: '100%', maxHeight: '80vh', objectFit: 'contain' }}
+            />
+          </div>
+        </Modal>
+      )}
+
+      {showModal && block && !hasImageUrl && (
         <BlockTableModal block={block} onClose={() => setShowModal(false)} />
       )}
     </>

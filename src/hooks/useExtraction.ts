@@ -1,16 +1,23 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase.ts';
 import { parseDocument } from '../lib/parser.ts';
-import { classifyTable, isExtractableCategory } from '../lib/tableClassifier.ts';
-import { ruleBasedExtract, llmExtractBatch, mergeResults } from '../lib/extraction.ts';
+import { classifyTable, isExtractableCategory, isVedomostMaterialov } from '../lib/tableClassifier.ts';
+import {
+  ruleBasedExtract,
+  llmExtractBatch,
+  llmExtractImageBlock,
+  mergeResults,
+  FALLBACK_PROMPT_UNIVERSAL,
+  FALLBACK_PROMPT_LAYER_CAKE,
+} from '../lib/extraction.ts';
 import { generateCanonicalKey } from '../lib/canonical.ts';
 import type { ExtractionProgress, MaterialFactItem } from '../types/extraction.ts';
 import type { BlockForExtraction } from '../lib/extraction.ts';
-import type { DbDocBlock } from '../types/database.ts';
 
 export function useExtraction(docId: string) {
   const [progress, setProgress] = useState<ExtractionProgress>({
     status: 'idle',
+    phase: undefined,
     completedBatches: 0,
     totalBatches: 0,
     extractedFacts: 0,
@@ -19,20 +26,32 @@ export function useExtraction(docId: string) {
 
   const runExtraction = useCallback(async (model?: string) => {
     try {
-      // Update document status and save model used
       await supabase
         .from('documents')
         .update({ status: 'extracting', model_used: model || null })
         .eq('id', docId);
 
-      // Clear existing material_facts for this document
       await supabase
         .from('material_facts')
         .delete()
         .eq('doc_id', docId);
 
-      // 1. Load the document raw_md to re-parse
-      setProgress(p => ({ ...p, status: 'rule_based', errorMessage: null }));
+      // ── Загрузить промпты из БД ──
+      const promptsResult = await supabase
+        .from('llm_prompts')
+        .select('key, system_prompt')
+        .eq('is_active', true);
+
+      const promptMap = new Map<string, string>();
+      for (const row of promptsResult.data ?? []) {
+        promptMap.set(row.key as string, row.system_prompt as string);
+      }
+
+      const universalPrompt = promptMap.get('universal_extraction') ?? FALLBACK_PROMPT_UNIVERSAL;
+      const layerCakePrompt = promptMap.get('layer_cake') ?? FALLBACK_PROMPT_LAYER_CAKE;
+
+      // ── Загрузить документ ──
+      setProgress(p => ({ ...p, status: 'rule_based', phase: 'Загрузка документа', errorMessage: null }));
 
       const { data: doc } = await supabase
         .from('documents')
@@ -44,149 +63,219 @@ export function useExtraction(docId: string) {
 
       const parsed = parseDocument(doc.raw_md);
 
-      // 2. Load block DB records to get their IDs
-      const { data: dbBlocks } = await supabase
+      // ── Загрузить блоки из БД (включая image_url) ──
+      const { data: dbBlocksRaw } = await supabase
         .from('doc_blocks')
-        .select('id, block_uid, has_table, has_error, page_id')
+        .select('id, block_uid, has_table, block_type, page_id, image_url')
         .eq('doc_id', docId);
 
-      if (!dbBlocks) throw new Error('Could not load blocks');
+      if (!dbBlocksRaw) throw new Error('Could not load blocks');
 
-      // Load pages for page_no mapping
-      const { data: dbPages } = await supabase
-        .from('doc_pages')
-        .select('id, page_no')
-        .eq('doc_id', docId);
+      type DbBlockRow = { id: string; block_uid: string; has_table: boolean; block_type: string; page_id: string; image_url: string | null };
+      const dbBlocks = dbBlocksRaw as DbBlockRow[];
 
-      const _pageIdToNo = new Map((dbPages ?? []).map(p => [p.id, p.page_no as number]));
-      void _pageIdToNo; // reserved for future use
-      const blockUidToDbId = new Map((dbBlocks as DbDocBlock[]).map(b => [b.block_uid, b.id]));
+      const blockUidToDbBlock = new Map(dbBlocks.map(b => [b.block_uid, b]));
 
-      // 3. Rule-based extraction from parsed tables
-      const ruleBasedResults = new Map<string, MaterialFactItem[]>();
-      const blocksNeedingLlm: BlockForExtraction[] = [];
+      // ── Классифицировать все TEXT блоки ──
+      const vedomostBlocks: BlockForExtraction[] = [];    // Фаза 1: ведомости материалов
+      const specBlocks: BlockForExtraction[] = [];         // Фаза 2: спецификации
+      const imageBlocks: BlockForExtraction[] = [];        // Фаза 3: изображения (пироги)
 
       for (const page of parsed.pages) {
         for (const block of page.blocks) {
           if (block.hasError) continue;
-
-          const dbId = blockUidToDbId.get(block.uid);
-          if (!dbId) continue;
+          const dbBlock = blockUidToDbBlock.get(block.uid);
+          if (!dbBlock) continue;
 
           if (block.type === 'TEXT') {
-            // Try rule-based extraction first
+            const sectionLower = (block.sectionTitle || '').toLowerCase();
+            const isGeneralSection = /общие указания|общие характеристики|общие данные|условные обозначения|общие сведения/.test(sectionLower);
+            if (isGeneralSection) continue;
+
             if (block.hasTable) {
-              const ruleItems = ruleBasedExtract(block);
-              if (ruleItems.length > 0) {
-                ruleBasedResults.set(dbId, ruleItems);
-              }
+              // Определяем, к какой фазе относится блок по категориям его таблиц
+              const categories = block.tables.map(t => classifyTable(t));
+              const hasVedomost = categories.some(c => isVedomostMaterialov(c));
+              const hasExtractable = categories.some(c => isExtractableCategory(c) && !isVedomostMaterialov(c));
 
-              // Check if any tables need LLM (non-trivial categories)
-              const hasComplexTables = block.tables.some(t => {
-                const cat = classifyTable(t);
-                return isExtractableCategory(cat) && cat !== 'material_qty' && cat !== 'element_spec' && cat !== 'spec_elements';
-              });
-
-              const hasUnknownTables = block.tables.some(t => classifyTable(t) === 'unknown');
-
-              if (hasComplexTables || hasUnknownTables || ruleItems.length === 0) {
-                blocksNeedingLlm.push({
+              if (hasVedomost) {
+                vedomostBlocks.push({
                   block,
                   pageNo: page.pageNo,
-                  blockDbId: dbId,
+                  blockDbId: dbBlock.id,
                   sectionContext: block.sectionTitle,
+                  sourceSection: 'vedomost_materialov',
+                  blockTypeDisplay: 'Таблица',
+                });
+              }
+              if (hasExtractable) {
+                specBlocks.push({
+                  block,
+                  pageNo: page.pageNo,
+                  blockDbId: dbBlock.id,
+                  sectionContext: block.sectionTitle,
+                  sourceSection: 'spetsifikatsiya',
+                  blockTypeDisplay: 'Таблица',
+                });
+              }
+              // Блоки с unknown-таблицами — в спецификации
+              const hasUnknown = categories.some(c => c === 'unknown');
+              if (hasUnknown && !hasVedomost && !hasExtractable) {
+                specBlocks.push({
+                  block,
+                  pageNo: page.pageNo,
+                  blockDbId: dbBlock.id,
+                  sectionContext: block.sectionTitle,
+                  sourceSection: 'spetsifikatsiya',
+                  blockTypeDisplay: 'Таблица',
                 });
               }
             } else {
-              // Text blocks without tables — might still contain material mentions
-              // Only send to LLM if content seems relevant (has quantity-like patterns)
-              // Exclude compound units like кг/м3 (density), т/м3 etc. via negative lookahead
+              // Текстовые блоки без таблиц — только с явными количественными паттернами
               const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг(?![\s]*\/)|т(?![\s]*\/|олщ)|л(?!ист|ин)|компл|слоя?)/i.test(block.content);
-              // Skip general-purpose note sections that describe material types/properties
-              // without specifying construction quantities
-              const sectionLower = (block.sectionTitle || '').toLowerCase();
-              const isGeneralSection = /общие указания|общие характеристики|общие данные|условные обозначения|общие сведения/.test(sectionLower);
-              if (hasQuantityPattern && !isGeneralSection) {
-                blocksNeedingLlm.push({
+              if (hasQuantityPattern) {
+                specBlocks.push({
                   block,
                   pageNo: page.pageNo,
-                  blockDbId: dbId,
+                  blockDbId: dbBlock.id,
                   sectionContext: block.sectionTitle,
+                  sourceSection: 'spetsifikatsiya',
+                  blockTypeDisplay: 'Текст',
                 });
               }
             }
           } else if (block.type === 'IMAGE') {
-            // IMAGE blocks with "Текст на чертеже:" may contain material info
-            const hasDrawingText = block.content.includes('Текст на чертеже:');
-            const hasMaterialKeyword = /облицовк|камен|гранит|плит|стяжк|гидроизол|утеплител|кирпич|бетон|штукатурк|армир/i.test(block.content);
-            // Note: мм excluded — it indicates thickness, not quantity
-            // Exclude compound units like кг/м3 (density) via negative lookahead
-            const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг(?![\s]*\/)|т(?![\s]*\/|олщ)|л(?!ист|ин)|компл|слоя?)/i.test(block.content);
-            // Skip legend/conditional notation blocks — they describe materials without quantities
-            const isLegend = block.content.includes('Условные обозначения') || (block.content.includes('Тип: Легенда'));
+            // Пропускаем легенды и планы этажей
+            const contentLower = block.content.toLowerCase();
+            if (contentLower.includes('тип: легенда') || contentLower.includes('тип: план')) continue;
 
-            if (hasDrawingText && hasMaterialKeyword && hasQuantityPattern && !isLegend) {
-              blocksNeedingLlm.push({
+            // Обрабатываем только разрезы, сечения, узлы
+            const isCrossSection = contentLower.includes('тип: разрез') ||
+              contentLower.includes('тип: сечение') ||
+              contentLower.includes('тип: узел');
+
+            if (isCrossSection && block.content.includes('Текст на чертеже:')) {
+              imageBlocks.push({
                 block,
                 pageNo: page.pageNo,
-                blockDbId: dbId,
-                sectionContext: block.sectionTitle ?? 'Текст на чертеже',
+                blockDbId: dbBlock.id,
+                sectionContext: block.sectionTitle,
+                imageUrl: dbBlock.image_url,
+                sourceSection: 'pirog',
+                blockTypeDisplay: 'Изображение',
               });
             }
           }
         }
       }
 
-      // 4. Save rule-based results immediately
       let totalFacts = 0;
-      for (const [blockDbId, items] of ruleBasedResults) {
-        await saveFactsToDb(docId, blockDbId, items, 'rule_based');
-        totalFacts += items.length;
+
+      // ════════════════════════════════════════════════════════
+      // ФАЗА 1: Ведомости материалов
+      // ════════════════════════════════════════════════════════
+      setProgress(p => ({
+        ...p,
+        status: 'rule_based',
+        phase: 'Фаза 1: Ведомости материалов',
+        completedBatches: 0,
+        totalBatches: vedomostBlocks.length,
+      }));
+
+      const ruleBasedResults = new Map<string, MaterialFactItem[]>();
+      const vedomostNeedingLlm: BlockForExtraction[] = [];
+
+      for (const bfe of vedomostBlocks) {
+        const ruleItems = ruleBasedExtract(bfe.block);
+        if (ruleItems.length > 0) {
+          ruleBasedResults.set(bfe.blockDbId, ruleItems);
+          await saveFactsToDb(docId, bfe.blockDbId, ruleItems, 'vedomost_materialov', 'Таблица');
+          totalFacts += ruleItems.length;
+        } else {
+          vedomostNeedingLlm.push(bfe);
+        }
       }
 
-      setProgress({
-        status: 'llm_extracting',
-        completedBatches: 0,
-        totalBatches: blocksNeedingLlm.length,
-        extractedFacts: totalFacts,
-        errorMessage: null,
-      });
+      if (vedomostNeedingLlm.length > 0) {
+        setProgress(p => ({
+          ...p,
+          status: 'llm_extracting',
+          phase: 'Фаза 1: Ведомости материалов (LLM)',
+          completedBatches: 0,
+          totalBatches: vedomostNeedingLlm.length,
+          extractedFacts: totalFacts,
+        }));
 
-      // 5. LLM extraction for remaining blocks
-      if (blocksNeedingLlm.length > 0) {
-        const llmResults = await llmExtractBatch(
-          blocksNeedingLlm,
-          (completed, total) => {
-            setProgress(p => ({
-              ...p,
-              completedBatches: completed,
-              totalBatches: total,
-            }));
-          },
+        const llmVedomost = await llmExtractBatch(
+          vedomostNeedingLlm,
+          universalPrompt,
+          (completed, total) => setProgress(p => ({ ...p, completedBatches: completed, totalBatches: total })),
           model,
         );
 
-        // 6. Merge and save LLM results
-        setProgress(p => ({ ...p, status: 'merging' }));
+        for (const [blockDbId, items] of llmVedomost) {
+          const filtered = filterLlmItems(items);
+          if (filtered.length > 0) {
+            await saveFactsToDb(docId, blockDbId, filtered, 'vedomost_materialov', 'Таблица');
+            totalFacts += filtered.length;
+          }
+        }
+      }
 
-        for (const [blockDbId, llmItems] of llmResults) {
-          // Post-filter LLM items: remove low-value extractions
-          const filteredLlmItems = llmItems.filter(item => {
-            // Keep items that have explicit quantity — these are valuable
-            if (item.quantity !== null) return true;
-            // Drop items with no quantity AND no unit AND low confidence
-            if (item.unit === null && item.confidence < 0.85) return false;
-            // Drop items whose name looks like a section header (short generic text, no specifics)
-            const nameLower = (item.canonical_name || item.raw_name).toLowerCase();
-            const isGenericHeader = /^(элементы|ограждения|перегородки|поручни|порученн|покрытия|наружная|стены|стена)\b/.test(nameLower);
-            if (isGenericHeader && item.quantity === null) return false;
-            return true;
+      // ════════════════════════════════════════════════════════
+      // ФАЗА 2: Спецификации
+      // ════════════════════════════════════════════════════════
+      setProgress(p => ({
+        ...p,
+        status: 'llm_extracting',
+        phase: 'Фаза 2: Спецификации',
+        completedBatches: 0,
+        totalBatches: specBlocks.length,
+        extractedFacts: totalFacts,
+      }));
+
+      const specRuleResults = new Map<string, MaterialFactItem[]>();
+      const specNeedingLlm: BlockForExtraction[] = [];
+
+      for (const bfe of specBlocks) {
+        if (bfe.block.hasTable) {
+          const ruleItems = ruleBasedExtract(bfe.block);
+          const hasComplexTables = bfe.block.tables.some(t => {
+            const cat = classifyTable(t);
+            return isExtractableCategory(cat) && cat !== 'material_qty' && cat !== 'element_spec' && cat !== 'spec_elements' && cat !== 'vedomost_materialov';
           });
+          const hasUnknownTables = bfe.block.tables.some(t => classifyTable(t) === 'unknown');
 
-          const ruleItems = ruleBasedResults.get(blockDbId) ?? [];
-          const merged = mergeResults(ruleItems, filteredLlmItems);
+          if (ruleItems.length > 0) {
+            specRuleResults.set(bfe.blockDbId, ruleItems);
+            await saveFactsToDb(docId, bfe.blockDbId, ruleItems, 'spetsifikatsiya', bfe.blockTypeDisplay ?? 'Таблица');
+            totalFacts += ruleItems.length;
+          }
 
-          // Only save LLM-unique items (rule-based already saved)
+          if (hasComplexTables || hasUnknownTables || ruleItems.length === 0) {
+            specNeedingLlm.push(bfe);
+          }
+        } else {
+          // Текстовые блоки — всегда в LLM
+          specNeedingLlm.push(bfe);
+        }
+      }
+
+      if (specNeedingLlm.length > 0) {
+        const llmSpec = await llmExtractBatch(
+          specNeedingLlm,
+          universalPrompt,
+          (completed, total) => setProgress(p => ({ ...p, completedBatches: completed, totalBatches: total })),
+          model,
+        );
+
+        setProgress(p => ({ ...p, status: 'merging', phase: 'Фаза 2: Сохранение спецификаций' }));
+
+        for (const [blockDbId, llmItems] of llmSpec) {
+          const filtered = filterLlmItems(llmItems);
+          const ruleItems = specRuleResults.get(blockDbId) ?? [];
+          const merged = mergeResults(ruleItems, filtered);
+
           const ruleKeys = new Set(ruleItems.map(i =>
             `${i.raw_name.toLowerCase().trim()}|${i.quantity ?? ''}|${(i.unit || '').toLowerCase()}`
           ));
@@ -195,15 +284,47 @@ export function useExtraction(docId: string) {
             return !ruleKeys.has(key);
           });
 
+          const bfe = specNeedingLlm.find(b => b.blockDbId === blockDbId);
+          const blockTypeDisplay = bfe?.blockTypeDisplay ?? 'Текст';
+
           if (llmUnique.length > 0) {
-            await saveFactsToDb(docId, blockDbId, llmUnique, 'llm');
+            await saveFactsToDb(docId, blockDbId, llmUnique, 'spetsifikatsiya', blockTypeDisplay);
             totalFacts += llmUnique.length;
           }
         }
       }
 
-      // 7. Update document status
-      setProgress(p => ({ ...p, status: 'saving' }));
+      // ════════════════════════════════════════════════════════
+      // ФАЗА 3: Пироги из изображений
+      // ════════════════════════════════════════════════════════
+      setProgress(p => ({
+        ...p,
+        status: 'llm_extracting',
+        phase: 'Фаза 3: Пироги конструкций',
+        completedBatches: 0,
+        totalBatches: imageBlocks.length,
+        extractedFacts: totalFacts,
+      }));
+
+      for (let i = 0; i < imageBlocks.length; i++) {
+        const bfe = imageBlocks[i];
+        const items = await llmExtractImageBlock(bfe, layerCakePrompt, model);
+        const filtered = items.filter(item => item.source_snippet);
+
+        if (filtered.length > 0) {
+          await saveFactsToDb(docId, bfe.blockDbId, filtered, 'pirog', 'Изображение');
+          totalFacts += filtered.length;
+        }
+
+        setProgress(p => ({ ...p, completedBatches: i + 1, extractedFacts: totalFacts }));
+
+        if (i < imageBlocks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      // ── Финализация ──
+      setProgress(p => ({ ...p, status: 'saving', phase: 'Сохранение' }));
 
       await supabase
         .from('documents')
@@ -212,8 +333,9 @@ export function useExtraction(docId: string) {
 
       setProgress({
         status: 'done',
-        completedBatches: blocksNeedingLlm.length,
-        totalBatches: blocksNeedingLlm.length,
+        phase: undefined,
+        completedBatches: vedomostBlocks.length + specBlocks.length + imageBlocks.length,
+        totalBatches: vedomostBlocks.length + specBlocks.length + imageBlocks.length,
         extractedFacts: totalFacts,
         errorMessage: null,
       });
@@ -236,11 +358,23 @@ export function useExtraction(docId: string) {
   return { progress, runExtraction };
 }
 
+function filterLlmItems(items: MaterialFactItem[]): MaterialFactItem[] {
+  return items.filter(item => {
+    if (item.quantity !== null) return true;
+    if (item.unit === null && item.confidence < 0.85) return false;
+    const nameLower = (item.canonical_name || item.raw_name).toLowerCase();
+    const isGenericHeader = /^(элементы|ограждения|перегородки|поручни|покрытия|наружная|стены|стена)\b/.test(nameLower);
+    if (isGenericHeader && item.quantity === null) return false;
+    return true;
+  });
+}
+
 async function saveFactsToDb(
   docId: string,
   blockDbId: string,
   items: MaterialFactItem[],
-  source: 'rule_based' | 'llm',
+  sourceSection: string,
+  blockTypeDisplay: string,
 ): Promise<void> {
   if (items.length === 0) return;
 
@@ -250,6 +384,8 @@ async function saveFactsToDb(
     raw_name: item.raw_name,
     canonical_name: item.canonical_name || item.raw_name,
     canonical_key: item.canonical_key || generateCanonicalKey(item.raw_name),
+    construction: item.construction ?? null,
+    extra_params: item.extra_params ?? null,
     quantity: item.quantity,
     unit: item.unit,
     mark: item.mark,
@@ -257,7 +393,9 @@ async function saveFactsToDb(
     description: item.description,
     note: item.note,
     source_snippet: item.source_snippet,
-    table_category: source,
+    source_section: sourceSection,
+    block_type_display: blockTypeDisplay,
+    table_category: sourceSection,
     confidence: item.confidence,
     user_verified: false,
   }));
