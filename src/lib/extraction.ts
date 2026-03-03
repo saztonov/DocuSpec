@@ -136,7 +136,7 @@ Return exactly this format:
 
 If no codes found: {"glossary": []}`;
 
-function buildUserPrompt(block: ParsedBlock, pageNo: number, sectionContext: string | null): string {
+export function buildUserPrompt(block: ParsedBlock, pageNo: number, sectionContext: string | null): string {
   let prompt = `Page: ${pageNo}\nBlock ID: ${block.uid}\n`;
   if (sectionContext) {
     prompt += `Section: ${sectionContext}\n`;
@@ -471,11 +471,13 @@ export async function llmExtractBatch(
   for (let i = 0; i < blocks.length; i++) {
     const { block, pageNo, blockDbId, sectionContext } = blocks[i];
 
+    const userPrompt = buildUserPrompt(block, pageNo, sectionContext);
+
     try {
       const response = await callLlmJson({
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: buildUserPrompt(block, pageNo, sectionContext) },
+          { role: 'user', content: userPrompt },
         ],
         temperature: 0.1,
         model,
@@ -485,6 +487,7 @@ export async function llmExtractBatch(
       const validated = ExtractionResponseSchema.parse(parsed);
 
       const validItems = validated.items.filter(item => item.source_snippet);
+      const droppedBySnippet = validated.items.filter(item => !item.source_snippet);
 
       for (const item of validItems) {
         item.canonical_key = generateCanonicalKey(item.canonical_name || item.raw_name);
@@ -497,9 +500,27 @@ export async function llmExtractBatch(
         Object.keys(parsed), validItems.length,
         response.usage ?? null, response.hasImage, response.durationMs,
       );
+
+      logger?.logLlmCallDetailed({
+        blockUid: block.uid,
+        blockType: 'TEXT',
+        phase: phase ?? '',
+        systemPrompt,
+        userPrompt,
+        rawResponse: response.content,
+        parsedItemsCount: validated.items.length,
+        validItemsCount: validItems.length,
+        droppedItems: droppedBySnippet.map(item => ({ raw_name: item.raw_name, reason: 'no_source_snippet' })),
+        responseKeys: Object.keys(parsed),
+        usage: response.usage ?? null,
+        hasImage: response.hasImage,
+        durationMs: response.durationMs,
+      });
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`LLM extraction failed for block ${block.uid}:`, err);
       results.set(blockDbId, []);
+      logger?.logLlmError(block.uid, 'TEXT', phase ?? '', errMsg, systemPrompt, userPrompt);
     }
 
     onProgress?.(i + 1, blocks.length);
@@ -542,6 +563,7 @@ export async function llmExtractImageBlock(
     const validated = ExtractionResponseSchema.parse(parsed);
 
     const validItems = validated.items.filter(item => item.source_snippet);
+    const droppedBySnippet = validated.items.filter(item => !item.source_snippet);
 
     for (const item of validItems) {
       item.canonical_key = generateCanonicalKey(item.canonical_name || item.raw_name);
@@ -553,9 +575,27 @@ export async function llmExtractImageBlock(
       response.usage ?? null, !!imageUrl, response.durationMs,
     );
 
+    logger?.logLlmCallDetailed({
+      blockUid: block.uid,
+      blockType: 'IMAGE',
+      phase: 'Фаза 3',
+      systemPrompt,
+      userPrompt: textContent,
+      rawResponse: response.content,
+      parsedItemsCount: validated.items.length,
+      validItemsCount: validItems.length,
+      droppedItems: droppedBySnippet.map(item => ({ raw_name: item.raw_name, reason: 'no_source_snippet' })),
+      responseKeys: Object.keys(parsed),
+      usage: response.usage ?? null,
+      hasImage: !!imageUrl,
+      durationMs: response.durationMs,
+    });
+
     return validItems;
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`LLM image extraction failed for block ${blockDbId}:`, err);
+    logger?.logLlmError(block.uid, 'IMAGE', 'Фаза 3', errMsg, systemPrompt, textContent);
     return [];
   }
 }
@@ -668,6 +708,7 @@ export async function llmExtractGlossary(
 
   for (let ci = 0; ci < contentChunks.length; ci++) {
     const chunk = contentChunks[ci];
+    const chunkLabel = `chunk_${ci + 1}/${contentChunks.length}`;
     try {
       const response = await callLlmJson({
         messages: [
@@ -691,12 +732,30 @@ export async function llmExtractGlossary(
       }
 
       logger?.logLlmCall(
-        `chunk_${ci + 1}/${contentChunks.length}`, 'glossary', 'Pass 0',
+        chunkLabel, 'glossary', 'Pass 0',
         Object.keys(parsed), chunkNewCodes,
         response.usage ?? null, false, response.durationMs,
       );
+
+      logger?.logLlmCallDetailed({
+        blockUid: chunkLabel,
+        blockType: 'glossary',
+        phase: 'Pass 0',
+        systemPrompt,
+        userPrompt: chunk,
+        rawResponse: response.content,
+        parsedItemsCount: validated.glossary.length,
+        validItemsCount: chunkNewCodes,
+        droppedItems: [],
+        responseKeys: Object.keys(parsed),
+        usage: response.usage ?? null,
+        hasImage: false,
+        durationMs: response.durationMs,
+      });
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.error('Glossary extraction chunk failed:', err);
+      logger?.logLlmError(chunkLabel, 'glossary', 'Pass 0', errMsg, systemPrompt, chunk);
     }
 
     if (ci < contentChunks.length - 1) {

@@ -1,6 +1,7 @@
 /**
  * Structured logging for the document extraction process.
  * Collects metrics across all phases and outputs a summary.
+ * Generates a downloadable JSON log file for each extraction session.
  */
 
 const PREFIX = '[DocuSpec]';
@@ -29,6 +30,108 @@ interface PhaseStats {
   llmFacts: number;
 }
 
+// ── Detailed log interfaces ──
+
+export interface LlmCallDetailedEntry {
+  timestamp: string;
+  blockUid: string;
+  blockType: string;
+  phase: string;
+  systemPrompt: string;
+  userPrompt: string;
+  rawResponse: string;
+  parsedItemsCount: number;
+  validItemsCount: number;
+  droppedItems: Array<{ raw_name: string; reason: string }>;
+  responseKeys: string[];
+  usage: LlmUsage | null;
+  hasImage: boolean;
+  durationMs: number;
+  error?: string;
+}
+
+export interface ClassificationEntry {
+  blockUid: string;
+  blockType: string;
+  pageNo: number;
+  sectionTitle: string | null;
+  tableCategories: string[];
+  assignedPhase: string | null;
+  skipReason?: string;
+}
+
+export interface FilterLogEntry {
+  blockDbId: string;
+  phase: string;
+  inputCount: number;
+  outputCount: number;
+  droppedItems: Array<{ raw_name: string; reason: string }>;
+}
+
+interface RuleBasedLogEntry {
+  blockUid: string;
+  phase: string;
+  extractedCount: number;
+  items: Array<{ raw_name: string; quantity: number | null; unit: string | null }>;
+}
+
+export interface SessionLog {
+  version: '1.0';
+  documentName: string;
+  documentId: string;
+  startTime: string;
+  endTime: string;
+  durationMs: number;
+  model: string;
+
+  prompts: {
+    universal: string;
+    layerCake: string;
+    glossary: string;
+    universalWithGlossary?: string;
+  };
+
+  parsing: {
+    totalPages: number;
+    totalBlocks: number;
+    textBlocks: number;
+    imageBlocks: number;
+    errorBlocks: number;
+  };
+
+  classification: {
+    summary: { vedomost: number; spec: number; assembly: number; products: number; images: number; skipped: number; total: number };
+    details: ClassificationEntry[];
+  };
+
+  llmCalls: LlmCallDetailedEntry[];
+
+  filterLog: FilterLogEntry[];
+
+  ruleBasedLog: RuleBasedLogEntry[];
+
+  phases: Array<{
+    name: string;
+    ruleBasedBlocks: number;
+    ruleBasedFacts: number;
+    llmBlocks: number;
+    llmFacts: number;
+  }>;
+
+  summary: {
+    totalMaterialFacts: number;
+    totalProductFacts: number;
+    glossaryCodes: number;
+    totalLlmCalls: number;
+    totalPromptTokens: number;
+    totalCompletionTokens: number;
+    totalTokens: number;
+    imagesSent: number;
+    imagesTotal: number;
+    errors: string[];
+  };
+}
+
 export class ExtractionLogger {
   private startTime = Date.now();
   private llmCalls: LlmCallEntry[] = [];
@@ -40,6 +143,22 @@ export class ExtractionLogger {
   private glossaryCount = 0;
   private imagesSent = 0;
   private imagesTotal = 0;
+
+  // ── Detailed log state ──
+  private docId = '';
+  private docName = '';
+  private model = '';
+  private prompts: SessionLog['prompts'] = { universal: '', layerCake: '', glossary: '' };
+  private parsingResult: SessionLog['parsing'] = { totalPages: 0, totalBlocks: 0, textBlocks: 0, imageBlocks: 0, errorBlocks: 0 };
+  private classificationSummary: SessionLog['classification']['summary'] | null = null;
+  private classificationDetails: ClassificationEntry[] = [];
+  private detailedCalls: LlmCallDetailedEntry[] = [];
+  private filterLogEntries: FilterLogEntry[] = [];
+  private ruleBasedEntries: RuleBasedLogEntry[] = [];
+  private phaseEntries: SessionLog['phases'] = [];
+  private errors: string[] = [];
+
+  // ── Existing console.log methods (unchanged) ──
 
   logStart(): void {
     this.startTime = Date.now();
@@ -55,6 +174,7 @@ export class ExtractionLogger {
     skipped: number;
     total: number;
   }): void {
+    this.classificationSummary = counts;
     console.log(
       `${PREFIX} Классификация: ${counts.total} блоков → ведомости:${counts.vedomost}, спец:${counts.spec}, сборки:${counts.assembly}, изделия:${counts.products}, пироги:${counts.images}, пропущено:${counts.skipped}`,
     );
@@ -110,6 +230,13 @@ export class ExtractionLogger {
     if (stats.llmBlocks > 0) parts.push(`LLM:${stats.llmFacts}`);
     const total = stats.ruleBasedFacts + stats.llmFacts;
     console.log(`${PREFIX} ${phase} итог: ${total} фактов (${parts.join(', ')})`);
+    this.phaseEntries.push({
+      name: phase,
+      ruleBasedBlocks: stats.ruleBasedBlocks,
+      ruleBasedFacts: stats.ruleBasedFacts,
+      llmBlocks: stats.llmBlocks,
+      llmFacts: stats.llmFacts,
+    });
   }
 
   addMaterialFacts(count: number): void {
@@ -150,5 +277,118 @@ export class ExtractionLogger {
         `${PREFIX}   Изображений передано: ${this.imagesSent}/${this.imagesTotal}${this.imagesTotal - this.imagesSent > 0 ? ` (${this.imagesTotal - this.imagesSent} без image_url)` : ''}`,
       );
     }
+  }
+
+  // ── New detailed log methods ──
+
+  logSessionInit(docId: string, docName: string, model: string): void {
+    this.docId = docId;
+    this.docName = docName;
+    this.model = model;
+  }
+
+  logPrompts(prompts: { universal: string; layerCake: string; glossary: string }): void {
+    this.prompts = { ...prompts };
+  }
+
+  logPromptWithGlossary(prompt: string): void {
+    this.prompts.universalWithGlossary = prompt;
+  }
+
+  logParsingResult(result: SessionLog['parsing']): void {
+    this.parsingResult = result;
+  }
+
+  logBlockClassification(entry: ClassificationEntry): void {
+    this.classificationDetails.push(entry);
+  }
+
+  logLlmCallDetailed(entry: Omit<LlmCallDetailedEntry, 'timestamp'>): void {
+    this.detailedCalls.push({ ...entry, timestamp: new Date().toISOString() });
+  }
+
+  logLlmError(blockUid: string, blockType: string, phase: string, error: string, systemPrompt: string, userPrompt: string): void {
+    this.detailedCalls.push({
+      timestamp: new Date().toISOString(),
+      blockUid,
+      blockType,
+      phase,
+      systemPrompt,
+      userPrompt,
+      rawResponse: '',
+      parsedItemsCount: 0,
+      validItemsCount: 0,
+      droppedItems: [],
+      responseKeys: [],
+      usage: null,
+      hasImage: false,
+      durationMs: 0,
+      error,
+    });
+    this.errors.push(`${phase} ${blockType}:${blockUid} — ${error}`);
+  }
+
+  logRuleBasedExtraction(blockUid: string, phase: string, items: Array<{ raw_name: string; quantity: number | null; unit: string | null }>): void {
+    this.ruleBasedEntries.push({
+      blockUid,
+      phase,
+      extractedCount: items.length,
+      items: items.map(i => ({ raw_name: i.raw_name, quantity: i.quantity, unit: i.unit })),
+    });
+  }
+
+  logFilterResult(entry: FilterLogEntry): void {
+    this.filterLogEntries.push(entry);
+  }
+
+  buildSessionLog(): SessionLog {
+    const endTime = Date.now();
+    return {
+      version: '1.0',
+      documentName: this.docName,
+      documentId: this.docId,
+      startTime: new Date(this.startTime).toISOString(),
+      endTime: new Date(endTime).toISOString(),
+      durationMs: endTime - this.startTime,
+      model: this.model,
+      prompts: this.prompts,
+      parsing: this.parsingResult,
+      classification: {
+        summary: this.classificationSummary ?? { vedomost: 0, spec: 0, assembly: 0, products: 0, images: 0, skipped: 0, total: 0 },
+        details: this.classificationDetails,
+      },
+      llmCalls: this.detailedCalls,
+      filterLog: this.filterLogEntries,
+      ruleBasedLog: this.ruleBasedEntries,
+      phases: this.phaseEntries,
+      summary: {
+        totalMaterialFacts: this.totalMaterialFacts,
+        totalProductFacts: this.totalProductFacts,
+        glossaryCodes: this.glossaryCount,
+        totalLlmCalls: this.llmCalls.length,
+        totalPromptTokens: this.totalPromptTokens,
+        totalCompletionTokens: this.totalCompletionTokens,
+        totalTokens: this.totalTokens,
+        imagesSent: this.imagesSent,
+        imagesTotal: this.imagesTotal,
+        errors: this.errors,
+      },
+    };
+  }
+
+  downloadLog(): void {
+    const log = this.buildSessionLog();
+    const json = JSON.stringify(log, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeName = this.docName.replace(/[^a-zA-Zа-яА-ЯёЁ0-9_-]/g, '_').slice(0, 60);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.href = url;
+    a.download = `extraction-log_${safeName}_${timestamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 }

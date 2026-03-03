@@ -27,6 +27,7 @@ export function useExtraction(docId: string) {
     extractedFacts: 0,
     errorMessage: null,
   });
+  const [lastLogger, setLastLogger] = useState<ExtractionLogger | null>(null);
 
   const runExtraction = useCallback(async (model?: string) => {
     const logger = new ExtractionLogger();
@@ -68,16 +69,20 @@ export function useExtraction(docId: string) {
       const layerCakePrompt = promptMap.get('layer_cake') ?? FALLBACK_PROMPT_LAYER_CAKE;
       const glossaryPrompt = promptMap.get('glossary_extraction') ?? FALLBACK_PROMPT_GLOSSARY;
 
+      logger.logPrompts({ universal: universalPrompt, layerCake: layerCakePrompt, glossary: glossaryPrompt });
+
       // ── Загрузить документ и section.code ──
       setProgress(p => ({ ...p, status: 'rule_based', phase: 'Загрузка документа', errorMessage: null }));
 
       const { data: doc } = await supabase
         .from('documents')
-        .select('raw_md, section_id')
+        .select('raw_md, section_id, title')
         .eq('id', docId)
         .single();
 
       if (!doc?.raw_md) throw new Error('Document not found or raw_md is empty');
+
+      logger.logSessionInit(docId, (doc as { title?: string }).title || 'unknown', model || 'default');
 
       // Загрузить section.code если есть section_id
       // sectionCode будет использован в будущих итерациях для выбора промптов по разделу
@@ -93,6 +98,27 @@ export function useExtraction(docId: string) {
       void _sectionCode;
 
       const parsed = parseDocument(doc.raw_md);
+
+      // ── Логирование парсинга ──
+      {
+        let textBlocks = 0;
+        let imgBlocks = 0;
+        let errorBlocks = 0;
+        for (const page of parsed.pages) {
+          for (const block of page.blocks) {
+            if (block.hasError) errorBlocks++;
+            if (block.type === 'TEXT') textBlocks++;
+            else if (block.type === 'IMAGE') imgBlocks++;
+          }
+        }
+        logger.logParsingResult({
+          totalPages: parsed.pages.length,
+          totalBlocks: parsed.pages.reduce((sum, p) => sum + p.blocks.length, 0),
+          textBlocks,
+          imageBlocks: imgBlocks,
+          errorBlocks,
+        });
+      }
 
       // ── Загрузить блоки из БД (включая image_url) ──
       const { data: dbBlocksRaw } = await supabase
@@ -172,14 +198,23 @@ export function useExtraction(docId: string) {
 
       for (const page of parsed.pages) {
         for (const block of page.blocks) {
-          if (block.hasError) continue;
+          if (block.hasError) {
+            logger.logBlockClassification({ blockUid: block.uid, blockType: block.type, pageNo: page.pageNo, sectionTitle: block.sectionTitle ?? null, tableCategories: [], assignedPhase: 'skipped', skipReason: `Ошибка: ${block.errorText || 'unknown'}` });
+            continue;
+          }
           const dbBlock = blockUidToDbBlock.get(block.uid);
-          if (!dbBlock) continue;
+          if (!dbBlock) {
+            logger.logBlockClassification({ blockUid: block.uid, blockType: block.type, pageNo: page.pageNo, sectionTitle: block.sectionTitle ?? null, tableCategories: [], assignedPhase: 'skipped', skipReason: 'Нет в БД (block_uid не найден)' });
+            continue;
+          }
 
           if (block.type === 'TEXT') {
             const sectionLower = (block.sectionTitle || '').toLowerCase();
             const isGeneralSection = /общие указания|общие характеристики|общие данные|условные обозначения|общие сведения/.test(sectionLower);
-            if (isGeneralSection) continue;
+            if (isGeneralSection) {
+              logger.logBlockClassification({ blockUid: block.uid, blockType: 'TEXT', pageNo: page.pageNo, sectionTitle: block.sectionTitle ?? null, tableCategories: [], assignedPhase: 'skipped', skipReason: `Общая секция: "${block.sectionTitle}"` });
+              continue;
+            }
 
             if (block.hasTable) {
               const categories = block.tables.map(t => classifyTable(t));
@@ -188,12 +223,15 @@ export function useExtraction(docId: string) {
               const hasVedomostIzd = categories.some(c => c === 'vedomost_izdelij');
               const hasExtractable = categories.some(c => isExtractableCategory(c) && !isVedomostMaterialov(c) && !isAssemblySpec(c));
 
+              const assignedPhases: string[] = [];
+
               if (hasVedomost) {
                 vedomostBlocks.push({
                   block, pageNo: page.pageNo, blockDbId: dbBlock.id,
                   sectionContext: block.sectionTitle,
                   sourceSection: 'vedomost_materialov', blockTypeDisplay: 'Таблица',
                 });
+                assignedPhases.push('vedomost');
               }
               if (hasAssemblySpec) {
                 assemblyBlocks.push({
@@ -201,6 +239,7 @@ export function useExtraction(docId: string) {
                   sectionContext: block.sectionTitle,
                   sourceSection: 'assembly_spec', blockTypeDisplay: 'Таблица',
                 });
+                assignedPhases.push('assembly');
               }
               if (hasVedomostIzd) {
                 productListBlocks.push({
@@ -208,6 +247,7 @@ export function useExtraction(docId: string) {
                   sectionContext: block.sectionTitle,
                   sourceSection: 'vedomost_izdelij', blockTypeDisplay: 'Таблица',
                 });
+                assignedPhases.push('products');
               }
               if (hasExtractable) {
                 specBlocks.push({
@@ -215,6 +255,7 @@ export function useExtraction(docId: string) {
                   sectionContext: block.sectionTitle,
                   sourceSection: 'spetsifikatsiya', blockTypeDisplay: 'Таблица',
                 });
+                assignedPhases.push('spec');
               }
               const hasUnknown = categories.some(c => c === 'unknown');
               if (hasUnknown && !hasVedomost && !hasExtractable && !hasAssemblySpec && !hasVedomostIzd) {
@@ -223,7 +264,16 @@ export function useExtraction(docId: string) {
                   sectionContext: block.sectionTitle,
                   sourceSection: 'spetsifikatsiya', blockTypeDisplay: 'Таблица',
                 });
+                assignedPhases.push('spec(unknown)');
               }
+
+              logger.logBlockClassification({
+                blockUid: block.uid, blockType: 'TEXT', pageNo: page.pageNo,
+                sectionTitle: block.sectionTitle ?? null,
+                tableCategories: categories,
+                assignedPhase: assignedPhases.length > 0 ? assignedPhases.join('+') : 'skipped',
+                skipReason: assignedPhases.length === 0 ? `Таблицы [${categories.join(', ')}] не extractable` : undefined,
+              });
             } else {
               const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг(?![\s]*\/)|т(?![\s]*\/|олщ)|л(?!ист|ин)|компл|слоя?)/i.test(block.content);
               if (hasQuantityPattern) {
@@ -232,11 +282,17 @@ export function useExtraction(docId: string) {
                   sectionContext: block.sectionTitle,
                   sourceSection: 'spetsifikatsiya', blockTypeDisplay: 'Текст',
                 });
+                logger.logBlockClassification({ blockUid: block.uid, blockType: 'TEXT', pageNo: page.pageNo, sectionTitle: block.sectionTitle ?? null, tableCategories: [], assignedPhase: 'spec(text)' });
+              } else {
+                logger.logBlockClassification({ blockUid: block.uid, blockType: 'TEXT', pageNo: page.pageNo, sectionTitle: block.sectionTitle ?? null, tableCategories: [], assignedPhase: 'skipped', skipReason: 'Нет таблиц и нет паттерна количества' });
               }
             }
           } else if (block.type === 'IMAGE') {
             const contentLower = block.content.toLowerCase();
-            if (contentLower.includes('тип: легенда') || contentLower.includes('тип: план')) continue;
+            if (contentLower.includes('тип: легенда') || contentLower.includes('тип: план')) {
+              logger.logBlockClassification({ blockUid: block.uid, blockType: 'IMAGE', pageNo: page.pageNo, sectionTitle: block.sectionTitle ?? null, tableCategories: [], assignedPhase: 'skipped', skipReason: 'IMAGE тип: легенда/план' });
+              continue;
+            }
             const isCrossSection = contentLower.includes('тип: разрез') ||
               contentLower.includes('тип: сечение') ||
               contentLower.includes('тип: узел');
@@ -247,6 +303,9 @@ export function useExtraction(docId: string) {
                 imageUrl: dbBlock.image_url,
                 sourceSection: 'pirog', blockTypeDisplay: 'Изображение',
               });
+              logger.logBlockClassification({ blockUid: block.uid, blockType: 'IMAGE', pageNo: page.pageNo, sectionTitle: block.sectionTitle ?? null, tableCategories: [], assignedPhase: 'image' });
+            } else {
+              logger.logBlockClassification({ blockUid: block.uid, blockType: 'IMAGE', pageNo: page.pageNo, sectionTitle: block.sectionTitle ?? null, tableCategories: [], assignedPhase: 'skipped', skipReason: isCrossSection ? 'Нет "Текст на чертеже:"' : 'IMAGE не разрез/сечение/узел' });
             }
           }
         }
@@ -279,6 +338,7 @@ export function useExtraction(docId: string) {
 
       for (const bfe of vedomostBlocks) {
         const ruleItems = ruleBasedExtract(bfe.block);
+        logger.logRuleBasedExtraction(bfe.block.uid, 'Фаза 1', ruleItems);
         if (ruleItems.length > 0) {
           await saveFactsToDb(docId, bfe.blockDbId, ruleItems, 'vedomost_materialov', 'Таблица');
           totalFacts += ruleItems.length;
@@ -295,9 +355,12 @@ export function useExtraction(docId: string) {
           completedBatches: 0, totalBatches: vedomostNeedingLlm.length, extractedFacts: totalFacts,
         }));
 
+        const promptWithGlossary1 = buildPromptWithGlossary(universalPrompt, glossaryMap);
+        logger.logPromptWithGlossary(promptWithGlossary1);
+
         const llmVedomost = await llmExtractBatch(
           vedomostNeedingLlm,
-          buildPromptWithGlossary(universalPrompt, glossaryMap),
+          promptWithGlossary1,
           (completed, total) => setProgress(p => ({ ...p, completedBatches: completed, totalBatches: total })),
           model,
           logger,
@@ -305,7 +368,7 @@ export function useExtraction(docId: string) {
         );
 
         for (const [blockDbId, items] of llmVedomost) {
-          const filtered = filterLlmItems(items);
+          const filtered = filterLlmItemsWithLog(items, blockDbId, 'Фаза 1', logger);
           if (filtered.length > 0) {
             await saveFactsToDb(docId, blockDbId, filtered, 'vedomost_materialov', 'Таблица');
             totalFacts += filtered.length;
@@ -337,6 +400,7 @@ export function useExtraction(docId: string) {
       for (const bfe of specBlocks) {
         if (bfe.block.hasTable) {
           const ruleItems = ruleBasedExtract(bfe.block);
+          logger.logRuleBasedExtraction(bfe.block.uid, 'Фаза 2', ruleItems);
           const hasComplexTables = bfe.block.tables.some(t => {
             const cat = classifyTable(t);
             return isExtractableCategory(cat) && cat !== 'material_qty' && cat !== 'element_spec' && cat !== 'spec_elements' && cat !== 'vedomost_materialov';
@@ -372,7 +436,7 @@ export function useExtraction(docId: string) {
         setProgress(p => ({ ...p, status: 'merging', phase: 'Фаза 2: Сохранение спецификаций' }));
 
         for (const [blockDbId, llmItems] of llmSpec) {
-          const filtered = filterLlmItems(llmItems);
+          const filtered = filterLlmItemsWithLog(llmItems, blockDbId, 'Фаза 2', logger);
           const ruleItems = specRuleResults.get(blockDbId) ?? [];
           const merged = mergeResults(ruleItems, filtered);
 
@@ -565,6 +629,8 @@ export function useExtraction(docId: string) {
       });
 
       logger.logFinalSummary();
+      logger.downloadLog();
+      setLastLogger(logger);
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Extraction failed';
@@ -573,10 +639,12 @@ export function useExtraction(docId: string) {
         .from('documents')
         .update({ status: 'error', error_message: message })
         .eq('id', docId);
+      logger.downloadLog();
+      setLastLogger(logger);
     }
   }, [docId]);
 
-  return { progress, runExtraction };
+  return { progress, runExtraction, lastLogger };
 }
 
 /**
@@ -605,6 +673,29 @@ function filterLlmItems(items: MaterialFactItem[]): MaterialFactItem[] {
     if (isGenericHeader && item.quantity === null) return false;
     return true;
   });
+}
+
+function categorizeDropReason(item: MaterialFactItem): string {
+  if (item.unit === null && item.confidence < 0.85) return 'no_quantity_low_confidence';
+  const nameLower = (item.canonical_name || item.raw_name).toLowerCase();
+  if (/^(элементы|ограждения|перегородки|поручни|покрытия|наружная|стены|стена)\b/.test(nameLower) && item.quantity === null) return 'generic_header_no_quantity';
+  return 'unknown';
+}
+
+function filterLlmItemsWithLog(items: MaterialFactItem[], blockDbId: string, phase: string, logger: ExtractionLogger): MaterialFactItem[] {
+  const result = filterLlmItems(items);
+  if (items.length !== result.length) {
+    const resultSet = new Set(result);
+    const dropped = items.filter(i => !resultSet.has(i));
+    logger.logFilterResult({
+      blockDbId,
+      phase,
+      inputCount: items.length,
+      outputCount: result.length,
+      droppedItems: dropped.map(i => ({ raw_name: i.raw_name, reason: categorizeDropReason(i) })),
+    });
+  }
+  return result;
 }
 
 async function saveFactsToDb(

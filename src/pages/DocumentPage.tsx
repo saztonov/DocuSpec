@@ -25,6 +25,7 @@ import {
   PlayCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import { supabase } from '../lib/supabase.ts';
 import { useBom } from '../hooks/useBom.ts';
@@ -561,7 +562,7 @@ function ExtractionProgress({ docId, onComplete, selectedModel, onModelChange }:
   selectedModel: string;
   onModelChange: (model: string) => void;
 }) {
-  const { progress, runExtraction } = useExtraction(docId);
+  const { progress, runExtraction, lastLogger } = useExtraction(docId);
   const { message } = App.useApp();
   const models = getAvailableModels();
 
@@ -615,9 +616,16 @@ function ExtractionProgress({ docId, onComplete, selectedModel, onModelChange }:
           Собрать ведомость
         </Button>
         {progress.status === 'done' && (
-          <Button icon={<ReloadOutlined />} onClick={handleStart}>
-            Пересобрать
-          </Button>
+          <>
+            <Button icon={<ReloadOutlined />} onClick={handleStart}>
+              Пересобрать
+            </Button>
+            {lastLogger && (
+              <Button icon={<DownloadOutlined />} onClick={() => lastLogger.downloadLog()}>
+                Скачать лог
+              </Button>
+            )}
+          </>
         )}
       </Space>
 
