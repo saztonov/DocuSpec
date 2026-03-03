@@ -33,6 +33,7 @@ export interface DbDocument {
   model_used: string | null;
   project_id: string | null;
   section_id: string | null;
+  glossary_status: 'pending' | 'done' | 'skipped' | null;
   created_at: string;
   updated_at: string;
 }
@@ -130,6 +131,36 @@ export interface DbLlmPrompt {
   system_prompt: string;
   default_system_prompt: string | null;
   is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbDocGlossary {
+  id: string;
+  doc_id: string;
+  code: string;
+  item_type: 'material' | 'assembly' | 'construction' | 'location' | 'color';
+  description: string | null;
+  source_block_id: string | null;
+  confidence: number;
+  created_at: string;
+}
+
+export interface DbProductFact {
+  id: string;
+  doc_id: string;
+  block_id: string | null;
+  assembly_mark: string;
+  assembly_name: string | null;
+  canonical_key: string | null;
+  quantity: number | null;
+  unit: string | null;
+  source_section: string;
+  description: string | null;
+  note: string | null;
+  source_snippet: string | null;
+  confidence: number;
+  user_verified: boolean;
   created_at: string;
   updated_at: string;
 }

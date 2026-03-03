@@ -1,6 +1,6 @@
 import type { ParsedTable, ParsedBlock } from '../types/parser.ts';
-import type { MaterialFactItem } from '../types/extraction.ts';
-import { ExtractionResponseSchema } from '../types/extraction.ts';
+import type { MaterialFactItem, GlossaryItem, GlossaryMap, ProductFactItem } from '../types/extraction.ts';
+import { ExtractionResponseSchema, GlossaryResponseSchema } from '../types/extraction.ts';
 import { classifyTable, isExtractableCategory } from './tableClassifier.ts';
 import { generateCanonicalKey } from './canonical.ts';
 import { callLlmJson, buildImageMessage } from './llm.ts';
@@ -37,6 +37,13 @@ FOR TYPE B (Спецификация элементов — components grouped u
 - "construction" field = the assembly name/mark (e.g., "ОГ-13", "ОГ-14", "Витраж В-1")
 - "raw_name" = the component material (e.g., "Стальная труба 30x15x2 мм")
 - Group headers like "ОГ-13, L=4 700" are assembly identifiers, NOT materials
+
+FOR TYPE E (Спецификация элементов фасада/отделки/конструкции — table has TWO name columns):
+- If the table has BOTH a "Наименование элементов [фасада/конструкции/...]" column AND a "Наименование материала [отделки/...]" column:
+  * "raw_name" = value from "Наименование материала" column (the ACTUAL material)
+  * "construction" = value from "Наименование элементов" column (the structural element)
+  * "extra_params" = color RAL value if present
+  * DO NOT use "Наименование элементов" as raw_name
 
 FOR TYPES A and D:
 - "construction" field = the structural element or location this material belongs to (e.g., "Отделка стены", "Ступень дорожная", "Фпод.п-1"), or null if no clear parent element
@@ -98,6 +105,36 @@ Each item in the "items" array must have this structure:
   "confidence": 0.85
 }`;
 
+export const FALLBACK_PROMPT_GLOSSARY = `You are analyzing Russian architectural documentation to extract a glossary of all codes, abbreviations, and marks used.
+
+TASK: Scan the provided content and extract all codes/marks/abbreviations with their type classification.
+
+TYPES:
+- "assembly" — a finished product/assembly identified by a mark (e.g., ОГ-13, ОГ-14, В-1):
+  * Has a numeric suffix after a letter prefix: ОГ-13, ОГ-19, В-1, ЩА-1
+  * Listed in "Ведомость изделий/ограждений" sections
+  * Appears as a group header in spec tables: "ОГ-13, L=4 700"
+  * Counted in whole units (шт) or linear meters (м.п.) as a finished product
+- "construction" — a structural element or location code:
+  * Appears in Поз. column of facade/floor/finish specifications
+  * Examples: Фпод.п-1, Фр-1, Фст-1, Н4, ОС-1
+  * Represents a location/zone, NOT a product
+- "material" — a raw material code (rare; usually materials have full names)
+- "location" — a room or zone identifier (e.g., А1-1, Зал №3)
+- "color" — a color standard code (e.g., RAL 9001, RAL-8002, RAL 8002)
+
+RULES:
+1. Only extract CODES/ABBREVIATIONS, NOT full material names like "Облицовочный натуральный камень".
+2. A code typically matches: [2-5 Cyrillic/Latin letters][optional ./-][digits] OR "RAL [digits]".
+3. Include each code only ONCE (deduplicate).
+4. For assemblies: use base mark WITHOUT dimensions (ОГ-13, NOT "ОГ-13, L=4 700").
+5. Return ONLY valid JSON. No text, no markdown, no explanation outside JSON.
+
+Return exactly this format:
+{"glossary": [{"code": "ОГ-13", "item_type": "assembly", "description": "Стальное ограждение"}, {"code": "RAL 9001", "item_type": "color", "description": "Кремово-белый"}]}
+
+If no codes found: {"glossary": []}`;
+
 function buildUserPrompt(block: ParsedBlock, pageNo: number, sectionContext: string | null): string {
   let prompt = `Page: ${pageNo}\nBlock ID: ${block.uid}\n`;
   if (sectionContext) {
@@ -111,7 +148,8 @@ function buildUserPrompt(block: ParsedBlock, pageNo: number, sectionContext: str
 
 /**
  * Extract materials from structured tables without LLM.
- * Works best for material_qty and element_spec tables.
+ * Works best for material_qty, element_spec and spec_elements tables.
+ * assembly_spec is handled separately via extractAssemblySpec.
  */
 export function ruleBasedExtract(block: ParsedBlock): MaterialFactItem[] {
   const results: MaterialFactItem[] = [];
@@ -119,6 +157,7 @@ export function ruleBasedExtract(block: ParsedBlock): MaterialFactItem[] {
   for (const table of block.tables) {
     const category = classifyTable(table);
     if (!isExtractableCategory(category)) continue;
+    if (category === 'assembly_spec') continue; // handled by extractAssemblySpec
 
     if (category === 'material_qty' || category === 'vedomost_materialov') {
       results.push(...extractMaterialQty(table));
@@ -305,25 +344,62 @@ function extractSpecElements(table: ParsedTable): MaterialFactItem[] {
   const results: MaterialFactItem[] = [];
   const posIdx = findColumnIndex(table.headers, 'поз');
   const designationIdx = findColumnIndex(table.headers, 'обозначение');
-  const nameIdx = findColumnIndex(table.headers, 'наименование', 'назначение');
+
+  // Приоритет: если есть колонка "материал отделки" / "наименование материала" —
+  // она является raw_name, а "наименование элементов" становится construction.
+  const materialColIdx = findColumnIndex(table.headers, 'наименование материала', 'материал отделки', 'материала отделки');
+  const elementColIdx = materialColIdx !== -1
+    ? findColumnIndex(table.headers, 'наименование элементов', 'наименование элемент', 'элементов фасада', 'элементов конструк')
+    : -1;
+
+  const nameIdx = materialColIdx !== -1
+    ? materialColIdx
+    : findColumnIndex(table.headers, 'наименование', 'назначение');
+
   const descIdx = findColumnIndex(table.headers, 'описание');
   const qtyIdx = findQtyColumnIndex(table.headers);
   const noteIdx = findColumnIndex(table.headers, 'примечание');
 
+  // Если есть отдельная колонка эталона цвета / RAL
+  const colorColIdx = findColumnIndex(table.headers, 'эталон', 'цвет', 'ral', 'колер');
+
   const primaryNameIdx = nameIdx !== -1 ? nameIdx : designationIdx;
   if (primaryNameIdx === -1) return results;
 
+  // Парсим quantity+unit из одной ячейки (например "10,5 м 2")
   for (const row of table.rows) {
     let rawName = row[primaryNameIdx]?.trim();
     if (!rawName || rawName.length < 3) continue;
 
     const mark = posIdx !== -1 ? row[posIdx]?.trim() || null : null;
-    const quantity = qtyIdx !== -1 ? parseRussianNumber(row[qtyIdx]) : null;
+
+    // construction: элемент/конструкция (колонка elementColIdx, если есть)
+    const constructionFromCol = elementColIdx !== -1 ? row[elementColIdx]?.trim() || null : null;
+
+    // Количество: сначала ищем через qtyIdx, потом — через parseQtyWithUnit по всем ячейкам
+    let quantity = qtyIdx !== -1 ? parseRussianNumber(row[qtyIdx]) : null;
+    let unit: string | null = null;
+
+    if (quantity === null && qtyIdx !== -1) {
+      const parsed = parseQtyWithUnit(row[qtyIdx] || '');
+      if (parsed.qty !== null) { quantity = parsed.qty; unit = parsed.unit; }
+    }
+
+    // Пробуем извлечь qty+unit из каждой ячейки кроме имени
+    if (quantity === null) {
+      for (let ci = 0; ci < row.length; ci++) {
+        if (ci === primaryNameIdx || ci === posIdx || ci === noteIdx || ci === colorColIdx) continue;
+        const parsed = parseQtyWithUnit(row[ci] || '');
+        if (parsed.qty !== null) { quantity = parsed.qty; unit = parsed.unit; break; }
+      }
+    }
+
     const note = noteIdx !== -1 ? row[noteIdx]?.trim() || null : null;
     const designation = designationIdx !== -1 && designationIdx !== primaryNameIdx
       ? row[designationIdx]?.trim() || null
       : null;
     const descText = descIdx !== -1 ? row[descIdx]?.trim() || null : null;
+    const colorText = colorColIdx !== -1 ? row[colorColIdx]?.trim() || null : null;
 
     let canonicalName = rawName;
     if (GENERIC_NAMES.includes(rawName.toLowerCase()) && descText && descText.length > 3) {
@@ -337,13 +413,15 @@ function extractSpecElements(table: ParsedTable): MaterialFactItem[] {
       raw_name: rawName,
       canonical_name: canonicalName,
       canonical_key: generateCanonicalKey(canonicalName),
+      construction: constructionFromCol ?? undefined,
+      extra_params: colorText ?? undefined,
       quantity,
-      unit: 'шт',
+      unit: unit || 'шт',
       mark,
       gost: extractGost(rawName + ' ' + (designation || '') + ' ' + (note || '')),
       description: descText || designation,
       note,
-      source_snippet: buildSnippet(rawName, quantity, 'шт'),
+      source_snippet: buildSnippet(rawName, quantity, unit || 'шт'),
       confidence: 0.9,
     });
   }
@@ -464,6 +542,143 @@ export async function llmExtractImageBlock(
     console.error(`LLM image extraction failed for block ${blockDbId}:`, err);
     return [];
   }
+}
+
+// ── Assembly spec extraction (produces materials + products) ──
+
+/**
+ * Assembly header pattern: строка вида "ОГ-13, L=4 700" или просто "ОГ-13" в позиционной колонке.
+ */
+function isAssemblyHeader(mark: string | null, name: string | null, glossaryMap: GlossaryMap): boolean {
+  // Проверка через глоссарий (наиболее надёжно)
+  if (mark && glossaryMap.has(mark)) {
+    return glossaryMap.get(mark)!.item_type === 'assembly';
+  }
+  // Паттерн: "ОГ-13, L=4 700" или имя совпадает с маркой+размером
+  const combined = [mark, name].filter(Boolean).join(' ');
+  return /^[А-ЯA-Z]{1,4}-\d+(?:\.\d+)?,?\s*(?:L|Н|B)=/i.test(combined.trim());
+}
+
+export interface AssemblySpecResult {
+  materials: MaterialFactItem[];
+  products: ProductFactItem[];
+}
+
+/**
+ * Extract assembly specs: assembly headers → ProductFactItem,
+ * component rows under each header → MaterialFactItem with construction=assembly_mark.
+ */
+export function extractAssemblySpec(table: ParsedTable, glossaryMap: GlossaryMap): AssemblySpecResult {
+  const materials: MaterialFactItem[] = [];
+  const products: ProductFactItem[] = [];
+
+  const posIdx = findColumnIndex(table.headers, 'поз');
+  const nameIdx = findColumnIndex(table.headers, 'наименование', 'назначение', 'обозначение');
+  const qtyIdx = findQtyColumnIndex(table.headers);
+  const noteIdx = findColumnIndex(table.headers, 'примечание');
+
+  if (nameIdx === -1 && posIdx === -1) return { materials, products };
+
+  let currentAssemblyMark: string | null = null;
+
+  for (const row of table.rows) {
+    const mark = posIdx !== -1 ? row[posIdx]?.trim() || null : null;
+    const name = nameIdx !== -1 ? row[nameIdx]?.trim() || null : null;
+    const note = noteIdx !== -1 ? row[noteIdx]?.trim() || null : null;
+    const quantity = qtyIdx !== -1 ? parseRussianNumber(row[qtyIdx]) : null;
+
+    if (!name && !mark) continue;
+
+    if (isAssemblyHeader(mark, name, glossaryMap)) {
+      // Сохраняем изделие
+      const assemblyMark = mark || name!.split(',')[0].trim();
+      const assemblyDesc = name && name !== assemblyMark ? name : null;
+      currentAssemblyMark = assemblyMark;
+      void assemblyDesc; // сохраняется в product.assembly_name ниже
+
+      products.push({
+        assembly_mark: assemblyMark,
+        assembly_name: assemblyDesc,
+        canonical_key: generateCanonicalKey(assemblyMark),
+        quantity,
+        unit: 'шт',
+        description: note,
+        note: null,
+        source_snippet: `${assemblyMark}${quantity !== null ? ` | ${quantity} шт` : ''}`,
+        confidence: 0.9,
+      });
+    } else if (name && name.length >= 3) {
+      // Строка-компонент — сохраняем как материал
+      let qty = quantity;
+      let unit: string | null = null;
+      if (qty === null && qtyIdx !== -1) {
+        const parsed = parseQtyWithUnit(row[qtyIdx] || '');
+        if (parsed.qty !== null) { qty = parsed.qty; unit = parsed.unit; }
+      }
+
+      materials.push({
+        raw_name: name,
+        canonical_name: name,
+        canonical_key: generateCanonicalKey(name),
+        construction: currentAssemblyMark ?? undefined,
+        quantity: qty,
+        unit: unit || 'шт',
+        mark,
+        gost: extractGost(name + ' ' + (note || '')),
+        description: null,
+        note,
+        source_snippet: buildSnippet(name, qty, unit || 'шт'),
+        confidence: 0.9,
+      });
+    }
+  }
+
+  return { materials, products };
+}
+
+// ── LLM Glossary extraction (Pass 0) ──
+
+/**
+ * Extract glossary from a chunk of document content using LLM.
+ */
+export async function llmExtractGlossary(
+  contentChunks: string[],
+  systemPrompt: string,
+  model?: string,
+): Promise<GlossaryItem[]> {
+  const allItems: GlossaryItem[] = [];
+  const seenCodes = new Set<string>();
+
+  for (const chunk of contentChunks) {
+    try {
+      const response = await callLlmJson({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: chunk },
+        ],
+        temperature: 0.1,
+        model,
+      });
+
+      const parsed = JSON.parse(response.content);
+      const validated = GlossaryResponseSchema.parse(parsed);
+
+      for (const item of validated.glossary) {
+        if (!seenCodes.has(item.code)) {
+          seenCodes.add(item.code);
+          allItems.push(item);
+        }
+      }
+    } catch (err) {
+      console.error('Glossary extraction chunk failed:', err);
+    }
+
+    if (contentChunks.indexOf(chunk) < contentChunks.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+  }
+
+  return allItems;
 }
 
 // ── Merge and dedup ──

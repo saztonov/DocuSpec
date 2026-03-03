@@ -13,13 +13,14 @@ import {
   Progress,
   App,
   Select,
-  Collapse,
+  Divider,
   Empty,
 } from 'antd';
 import {
   FileTextOutlined,
   ExperimentOutlined,
   UnorderedListOutlined,
+  AppstoreOutlined,
   WarningOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
@@ -28,14 +29,14 @@ import {
 import { supabase } from '../lib/supabase.ts';
 import { useBom } from '../hooks/useBom.ts';
 import { useExtraction } from '../hooks/useExtraction.ts';
+import { useProducts } from '../hooks/useProducts.ts';
 import { generateCanonicalKey } from '../lib/canonical.ts';
 import { getAvailableModels } from '../lib/models.ts';
 import BlockTableModal from '../components/BlockTableModal.tsx';
 import BlockLink from '../components/BlockLink.tsx';
-import type { DbDocument, DbDocPage, DbDocBlock, DbMaterialFact, DbBomSummary } from '../types/database.ts';
+import type { DbDocument, DbDocPage, DbDocBlock, DbMaterialFact, DbBomSummary, DbProductFact } from '../types/database.ts';
 
 const { Title, Text } = Typography;
-const { Panel } = Collapse;
 
 // ── Status color mapping ──
 const STATUS_COLOR: Record<string, string> = {
@@ -270,7 +271,7 @@ function MaterialsTab({ docId }: { docId: string }) {
   if (facts.length === 0) return <Empty description="Материалы ещё не извлечены. Нажмите «Собрать ведомость»." />;
 
   const vedomostFacts = facts.filter(f => f.source_section === 'vedomost_materialov');
-  const specFacts = facts.filter(f => f.source_section === 'spetsifikatsiya');
+  const specFacts = facts.filter(f => f.source_section === 'spetsifikatsiya' || f.source_section === 'assembly_spec');
   const pirogFacts = facts.filter(f => f.source_section === 'pirog');
   const otherFacts = facts.filter(f => !f.source_section);
 
@@ -284,20 +285,25 @@ function MaterialsTab({ docId }: { docId: string }) {
     }
     return (
       <div style={{ marginBottom: 24 }}>
-        <Title level={5} style={{ marginBottom: 8 }}>{title} <Tag>{sectionFacts.length} поз.</Tag></Title>
-        <Collapse defaultActiveKey={[...groups.keys()].slice(0, 3)}>
-          {[...groups.entries()].map(([blockId, groupFacts]) => {
-            const firstFact = groupFacts[0];
-            const headerLabel = firstFact?.construction
-              ? firstFact.construction
-              : <Text type="secondary" code style={{ fontSize: 12 }}>{blockId.slice(0, 12)}…</Text>;
-            return (
-              <Panel key={blockId} header={<Space>{headerLabel}<Tag color="default">{groupFacts.length} поз.</Tag></Space>}>
-                <Table dataSource={groupFacts.map(f => ({ ...f, key: f.id }))} columns={columns} size="small" pagination={false} scroll={{ x: 1100 }} />
-              </Panel>
-            );
-          })}
-        </Collapse>
+        <Title level={5} style={{ marginBottom: 4 }}>{title} <Tag>{sectionFacts.length} поз.</Tag></Title>
+        {[...groups.entries()].map(([blockId, groupFacts], idx) => {
+          const firstFact = groupFacts[0];
+          const headerLabel = firstFact?.construction
+            ? firstFact.construction
+            : <Text type="secondary" code style={{ fontSize: 11 }}>{blockId.slice(0, 12)}…</Text>;
+          return (
+            <div key={blockId}>
+              <Divider style={{ margin: '6px 0 4px', fontSize: 12, color: '#8c8c8c' }}>
+                <Space size={4}>
+                  {headerLabel}
+                  <Tag color="default" style={{ fontSize: 11 }}>{groupFacts.length} поз.</Tag>
+                  <BlockLink blockId={blockId} />
+                </Space>
+              </Divider>
+              <Table dataSource={groupFacts.map(f => ({ ...f, key: f.id }))} columns={columns} size="small" pagination={false} scroll={{ x: 1100 }} style={{ marginBottom: idx < groups.size - 1 ? 0 : 0 }} />
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -308,6 +314,56 @@ function MaterialsTab({ docId }: { docId: string }) {
       {renderSection('Спецификации', specFacts)}
       {renderSection('Пироги конструкций', pirogFacts)}
       {renderSection('Прочее', otherFacts)}
+    </div>
+  );
+}
+
+// ── ProductsTab ──
+function ProductsTab({ docId }: { docId: string }) {
+  const { products, loading } = useProducts(docId);
+  const [filterMark, setFilterMark] = useState<string | null>(null);
+
+  if (loading) return <Spin />;
+  if (products.length === 0) return <Empty description="Изделия не обнаружены." />;
+
+  const prodColumns = [
+    {
+      title: 'Марка', dataIndex: 'assembly_mark', key: 'assembly_mark', width: 120,
+      render: (v: string) => (
+        <Text
+          style={{ cursor: 'pointer', color: filterMark === v ? '#1677ff' : undefined }}
+          onClick={() => setFilterMark((prev) => prev === v ? null : v)}
+          title="Фильтр по марке"
+        >
+          {v}
+        </Text>
+      ),
+    },
+    { title: 'Наименование', dataIndex: 'assembly_name', key: 'assembly_name', ellipsis: true, render: (v: string | null) => v ?? '—' },
+    { title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 80, render: (v: number | null) => v ?? '—' },
+    { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 55, render: (v: string | null) => v ?? '—' },
+    { title: 'Описание', dataIndex: 'description', key: 'description', ellipsis: true, render: (v: string | null) => v ?? '—' },
+    { title: 'Примечание', dataIndex: 'note', key: 'note', ellipsis: true, render: (v: string | null) => v ?? '—' },
+    { title: 'Блок', dataIndex: 'block_id', key: 'block_id', width: 130, render: (v: string | null) => v ? <BlockLink blockId={v} /> : '—' },
+  ];
+
+  const filtered = filterMark ? (products as DbProductFact[]).filter(p => p.assembly_mark === filterMark) : products as DbProductFact[];
+
+  return (
+    <div>
+      {filterMark && (
+        <div style={{ marginBottom: 8 }}>
+          <Text type="secondary">Фильтр: </Text>
+          <Tag closable onClose={() => setFilterMark(null)} color="blue">{filterMark}</Tag>
+        </div>
+      )}
+      <Table
+        dataSource={filtered.map(p => ({ ...p, key: p.id }))}
+        columns={prodColumns}
+        size="small"
+        pagination={false}
+        scroll={{ x: 900 }}
+      />
     </div>
   );
 }
@@ -579,7 +635,7 @@ function ExtractionProgress({ docId, onComplete, selectedModel, onModelChange }:
       )}
 
       {progress.status === 'error' && (
-        <Alert type="error" message={statusLabels.error} />
+        <Alert type="error" message={statusText.error} />
       )}
     </Space>
   );
@@ -664,6 +720,15 @@ export default function DocumentPage() {
         </span>
       ),
       children: <MaterialsTab docId={document.id} />,
+    },
+    {
+      key: 'products',
+      label: (
+        <span>
+          <AppstoreOutlined /> Изделия
+        </span>
+      ),
+      children: <ProductsTab docId={document.id} />,
     },
     {
       key: 'bom',

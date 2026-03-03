@@ -35,7 +35,7 @@ function groupStatements(data: StatementWithRefs[]): ProjectGroup[] {
 
   const groups: ProjectGroup[] = [];
 
-  for (const [key, { project, items }] of projectMap) {
+  for (const [, { project, items }] of projectMap) {
     const sectionMap = new Map<string, { section: DbSection | null; statements: StatementWithRefs[] }>();
     for (const s of items) {
       const sKey = s.section_id ?? '__none__';

@@ -40,9 +40,21 @@ export function classifyTable(table: ParsedTable): TableCategory {
     sectionLower.includes('ведомость ограждений') ||
     sectionLower.includes('ведомость заполнен') ||
     sectionLower.includes('ведомость дверей') ||
-    sectionLower.includes('ведомость окон')
+    sectionLower.includes('ведомость окон') ||
+    sectionLower.includes('ведомость витражей') ||
+    sectionLower.includes('ведомость перегородок')
   ) {
     return 'vedomost_izdelij';
+  }
+
+  // Спецификация элементов сборок (ограждений, конструкций) — иерархические таблицы,
+  // где строки-заголовки являются сборными единицами, а подстроки — их компонентами.
+  // Детектируется по секции "спецификация элементов ограждений" / "спецификация ограждений"
+  if (
+    sectionLower.includes('спецификация элементов ограждений') ||
+    sectionLower.includes('спецификация ограждений')
+  ) {
+    return 'assembly_spec';
   }
 
   // Room schedule — skip (экспликация помещений)
@@ -166,6 +178,13 @@ export function isExtractableCategory(category: TableCategory): boolean {
   return category !== 'change_log' && category !== 'room_schedule' &&
     category !== 'reference_docs' && category !== 'drawing_list' &&
     category !== 'vedomost_izdelij';
+}
+
+/**
+ * Check if a category is an assembly specification (produces both material_facts and product_facts).
+ */
+export function isAssemblySpec(category: TableCategory): boolean {
+  return category === 'assembly_spec';
 }
 
 /**

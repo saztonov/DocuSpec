@@ -5,7 +5,7 @@
       "views": [
         {
           "name": "bom_summary",
-          "definition": " SELECT doc_id,\n    canonical_key,\n    max(canonical_name) AS canonical_name,\n    unit,\n    sum(quantity) AS total_qty,\n    count(*) AS fact_count,\n    array_agg(DISTINCT block_id) AS source_block_ids,\n    bool_and(user_verified) AS all_verified\n   FROM material_facts mf\n  WHERE (canonical_key IS NOT NULL)\n  GROUP BY doc_id, canonical_key, unit;"
+          "definition": " SELECT doc_id,\n    canonical_key,\n    max(canonical_name) AS canonical_name,\n    unit,\n    sum(quantity) AS total_qty,\n    count(*) AS fact_count,\n    array_agg(DISTINCT block_id) AS source_block_ids,\n    bool_and(user_verified) AS all_verified,\n    array_agg(DISTINCT block_type_display) FILTER (WHERE (block_type_display IS NOT NULL)) AS source_block_display_types\n   FROM material_facts mf\n  WHERE (canonical_key IS NOT NULL)\n  GROUP BY doc_id, canonical_key, unit;"
         }
       ],
       "schema": "public",
@@ -109,6 +109,92 @@
               "default": "now()",
               "nullable": false,
               "position": 11,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "image_url",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 12,
+              "max_length": null,
+              "numeric_precision": null
+            }
+          ]
+        },
+        {
+          "name": "doc_glossary",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": false,
+              "position": 1,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "doc_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": false,
+              "position": 2,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "code",
+              "type": "text",
+              "default": null,
+              "nullable": false,
+              "position": 3,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "item_type",
+              "type": "text",
+              "default": null,
+              "nullable": false,
+              "position": 4,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "description",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 5,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "source_block_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": true,
+              "position": 6,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "confidence",
+              "type": "real",
+              "default": "0.8",
+              "nullable": false,
+              "position": 7,
+              "max_length": null,
+              "numeric_precision": 24
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "default": "now()",
+              "nullable": false,
+              "position": 8,
               "max_length": null,
               "numeric_precision": null
             }
@@ -328,6 +414,101 @@
               "position": 17,
               "max_length": null,
               "numeric_precision": null
+            },
+            {
+              "name": "glossary_status",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 18,
+              "max_length": null,
+              "numeric_precision": null
+            }
+          ]
+        },
+        {
+          "name": "llm_prompts",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": false,
+              "position": 1,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "key",
+              "type": "text",
+              "default": null,
+              "nullable": false,
+              "position": 2,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "name",
+              "type": "text",
+              "default": null,
+              "nullable": false,
+              "position": 3,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "description",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 4,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "system_prompt",
+              "type": "text",
+              "default": null,
+              "nullable": false,
+              "position": 5,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "default_system_prompt",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 6,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "is_active",
+              "type": "boolean",
+              "default": "true",
+              "nullable": false,
+              "position": 7,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "default": "now()",
+              "nullable": false,
+              "position": 8,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamp with time zone",
+              "default": "now()",
+              "nullable": false,
+              "position": 9,
+              "max_length": null,
+              "numeric_precision": null
             }
           ]
         },
@@ -493,6 +674,191 @@
               "default": "now()",
               "nullable": false,
               "position": 18,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "source_section",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 19,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "construction",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 20,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "extra_params",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 21,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "block_type_display",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 22,
+              "max_length": null,
+              "numeric_precision": null
+            }
+          ]
+        },
+        {
+          "name": "product_facts",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": false,
+              "position": 1,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "doc_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": false,
+              "position": 2,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "block_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": true,
+              "position": 3,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "assembly_mark",
+              "type": "text",
+              "default": null,
+              "nullable": false,
+              "position": 4,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "assembly_name",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 5,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "canonical_key",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 6,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "quantity",
+              "type": "numeric",
+              "default": null,
+              "nullable": true,
+              "position": 7,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "unit",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 8,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "source_section",
+              "type": "text",
+              "default": null,
+              "nullable": false,
+              "position": 9,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "description",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 10,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "note",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 11,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "source_snippet",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 12,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "confidence",
+              "type": "real",
+              "default": "0.8",
+              "nullable": false,
+              "position": 13,
+              "max_length": null,
+              "numeric_precision": 24
+            },
+            {
+              "name": "user_verified",
+              "type": "boolean",
+              "default": "false",
+              "nullable": false,
+              "position": 14,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "default": "now()",
+              "nullable": false,
+              "position": 15,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamp with time zone",
+              "default": "now()",
+              "nullable": false,
+              "position": 16,
               "max_length": null,
               "numeric_precision": null
             }
@@ -802,6 +1168,21 @@
           "table_name": "doc_blocks"
         },
         {
+          "name": "doc_glossary_doc_id_code_key",
+          "definition": "CREATE UNIQUE INDEX doc_glossary_doc_id_code_key ON public.doc_glossary USING btree (doc_id, code)",
+          "table_name": "doc_glossary"
+        },
+        {
+          "name": "doc_glossary_pkey",
+          "definition": "CREATE UNIQUE INDEX doc_glossary_pkey ON public.doc_glossary USING btree (id)",
+          "table_name": "doc_glossary"
+        },
+        {
+          "name": "idx_doc_glossary_doc_id",
+          "definition": "CREATE INDEX idx_doc_glossary_doc_id ON public.doc_glossary USING btree (doc_id)",
+          "table_name": "doc_glossary"
+        },
+        {
           "name": "doc_pages_doc_id_page_no_key",
           "definition": "CREATE UNIQUE INDEX doc_pages_doc_id_page_no_key ON public.doc_pages USING btree (doc_id, page_no)",
           "table_name": "doc_pages"
@@ -822,6 +1203,16 @@
           "table_name": "documents"
         },
         {
+          "name": "llm_prompts_key_key",
+          "definition": "CREATE UNIQUE INDEX llm_prompts_key_key ON public.llm_prompts USING btree (key)",
+          "table_name": "llm_prompts"
+        },
+        {
+          "name": "llm_prompts_pkey",
+          "definition": "CREATE UNIQUE INDEX llm_prompts_pkey ON public.llm_prompts USING btree (id)",
+          "table_name": "llm_prompts"
+        },
+        {
           "name": "idx_material_facts_block_id",
           "definition": "CREATE INDEX idx_material_facts_block_id ON public.material_facts USING btree (block_id)",
           "table_name": "material_facts"
@@ -840,6 +1231,21 @@
           "name": "material_facts_pkey",
           "definition": "CREATE UNIQUE INDEX material_facts_pkey ON public.material_facts USING btree (id)",
           "table_name": "material_facts"
+        },
+        {
+          "name": "idx_product_facts_block_id",
+          "definition": "CREATE INDEX idx_product_facts_block_id ON public.product_facts USING btree (block_id)",
+          "table_name": "product_facts"
+        },
+        {
+          "name": "idx_product_facts_doc_id",
+          "definition": "CREATE INDEX idx_product_facts_doc_id ON public.product_facts USING btree (doc_id)",
+          "table_name": "product_facts"
+        },
+        {
+          "name": "product_facts_pkey",
+          "definition": "CREATE UNIQUE INDEX product_facts_pkey ON public.product_facts USING btree (id)",
+          "table_name": "product_facts"
         },
         {
           "name": "projects_pkey",
@@ -884,6 +1290,17 @@
       "foreign_keys": [
         {
           "columns": [
+            "page_id"
+          ],
+          "table_name": "doc_blocks",
+          "constraint_name": "doc_blocks_page_id_fkey",
+          "references_table": "doc_pages",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "doc_id"
           ],
           "table_name": "doc_blocks",
@@ -895,11 +1312,22 @@
         },
         {
           "columns": [
-            "page_id"
+            "doc_id"
           ],
-          "table_name": "doc_blocks",
-          "constraint_name": "doc_blocks_page_id_fkey",
-          "references_table": "doc_pages",
+          "table_name": "doc_glossary",
+          "constraint_name": "doc_glossary_doc_id_fkey",
+          "references_table": "documents",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "source_block_id"
+          ],
+          "table_name": "doc_glossary",
+          "constraint_name": "doc_glossary_source_block_id_fkey",
+          "references_table": "doc_blocks",
           "references_columns": [
             "id"
           ]
@@ -961,11 +1389,44 @@
         },
         {
           "columns": [
+            "doc_id"
+          ],
+          "table_name": "product_facts",
+          "constraint_name": "product_facts_doc_id_fkey",
+          "references_table": "documents",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "block_id"
+          ],
+          "table_name": "product_facts",
+          "constraint_name": "product_facts_block_id_fkey",
+          "references_table": "doc_blocks",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "statement_id"
           ],
           "table_name": "statement_items",
           "constraint_name": "statement_items_statement_id_fkey",
           "references_table": "statements",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "doc_id"
+          ],
+          "table_name": "statements",
+          "constraint_name": "statements_doc_id_fkey",
+          "references_table": "documents",
           "references_columns": [
             "id"
           ]
@@ -991,20 +1452,9 @@
           "references_columns": [
             "id"
           ]
-        },
-        {
-          "columns": [
-            "doc_id"
-          ],
-          "table_name": "statements",
-          "constraint_name": "statements_doc_id_fkey",
-          "references_table": "documents",
-          "references_columns": [
-            "id"
-          ]
         }
       ],
-      "generated_at": "2026-03-02T15:52:23.188539+00:00",
+      "generated_at": "2026-03-03T11:36:28.660731+00:00",
       "primary_keys": [
         {
           "columns": [
@@ -1012,6 +1462,13 @@
           ],
           "table_name": "doc_blocks",
           "constraint_name": "doc_blocks_pkey"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "table_name": "doc_glossary",
+          "constraint_name": "doc_glossary_pkey"
         },
         {
           "columns": [
@@ -1031,8 +1488,22 @@
           "columns": [
             "id"
           ],
+          "table_name": "llm_prompts",
+          "constraint_name": "llm_prompts_pkey"
+        },
+        {
+          "columns": [
+            "id"
+          ],
           "table_name": "material_facts",
           "constraint_name": "material_facts_pkey"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "table_name": "product_facts",
+          "constraint_name": "product_facts_pkey"
         },
         {
           "columns": [
@@ -1066,11 +1537,6 @@
       "check_constraints": [
         {
           "table_name": "doc_blocks",
-          "check_clause": "page_id IS NOT NULL",
-          "constraint_name": "2200_17524_3_not_null"
-        },
-        {
-          "table_name": "doc_blocks",
           "check_clause": "id IS NOT NULL",
           "constraint_name": "2200_17524_1_not_null"
         },
@@ -1078,6 +1544,21 @@
           "table_name": "doc_blocks",
           "check_clause": "(block_type = ANY (ARRAY['TEXT'::text, 'IMAGE'::text]))",
           "constraint_name": "doc_blocks_block_type_check"
+        },
+        {
+          "table_name": "doc_blocks",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_17524_11_not_null"
+        },
+        {
+          "table_name": "doc_blocks",
+          "check_clause": "has_error IS NOT NULL",
+          "constraint_name": "2200_17524_8_not_null"
+        },
+        {
+          "table_name": "doc_blocks",
+          "check_clause": "has_table IS NOT NULL",
+          "constraint_name": "2200_17524_7_not_null"
         },
         {
           "table_name": "doc_blocks",
@@ -1096,33 +1577,53 @@
         },
         {
           "table_name": "doc_blocks",
+          "check_clause": "page_id IS NOT NULL",
+          "constraint_name": "2200_17524_3_not_null"
+        },
+        {
+          "table_name": "doc_blocks",
           "check_clause": "doc_id IS NOT NULL",
           "constraint_name": "2200_17524_2_not_null"
         },
         {
-          "table_name": "doc_blocks",
+          "table_name": "doc_glossary",
+          "check_clause": "item_type IS NOT NULL",
+          "constraint_name": "2200_22245_4_not_null"
+        },
+        {
+          "table_name": "doc_glossary",
+          "check_clause": "confidence IS NOT NULL",
+          "constraint_name": "2200_22245_7_not_null"
+        },
+        {
+          "table_name": "doc_glossary",
           "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_17524_11_not_null"
+          "constraint_name": "2200_22245_8_not_null"
         },
         {
-          "table_name": "doc_blocks",
-          "check_clause": "has_error IS NOT NULL",
-          "constraint_name": "2200_17524_8_not_null"
+          "table_name": "doc_glossary",
+          "check_clause": "(item_type = ANY (ARRAY['material'::text, 'assembly'::text, 'construction'::text, 'location'::text, 'color'::text]))",
+          "constraint_name": "doc_glossary_item_type_check"
         },
         {
-          "table_name": "doc_blocks",
-          "check_clause": "has_table IS NOT NULL",
-          "constraint_name": "2200_17524_7_not_null"
+          "table_name": "doc_glossary",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_22245_1_not_null"
+        },
+        {
+          "table_name": "doc_glossary",
+          "check_clause": "doc_id IS NOT NULL",
+          "constraint_name": "2200_22245_2_not_null"
+        },
+        {
+          "table_name": "doc_glossary",
+          "check_clause": "code IS NOT NULL",
+          "constraint_name": "2200_22245_3_not_null"
         },
         {
           "table_name": "doc_pages",
           "check_clause": "created_at IS NOT NULL",
           "constraint_name": "2200_17508_6_not_null"
-        },
-        {
-          "table_name": "doc_pages",
-          "check_clause": "page_no IS NOT NULL",
-          "constraint_name": "2200_17508_3_not_null"
         },
         {
           "table_name": "doc_pages",
@@ -1135,9 +1636,9 @@
           "constraint_name": "2200_17508_1_not_null"
         },
         {
-          "table_name": "documents",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_17494_1_not_null"
+          "table_name": "doc_pages",
+          "check_clause": "page_no IS NOT NULL",
+          "constraint_name": "2200_17508_3_not_null"
         },
         {
           "table_name": "documents",
@@ -1146,23 +1647,13 @@
         },
         {
           "table_name": "documents",
-          "check_clause": "updated_at IS NOT NULL",
-          "constraint_name": "2200_17494_13_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_17494_1_not_null"
         },
         {
           "table_name": "documents",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_17494_12_not_null"
-        },
-        {
-          "table_name": "documents",
-          "check_clause": "error_blocks_count IS NOT NULL",
-          "constraint_name": "2200_17494_8_not_null"
-        },
-        {
-          "table_name": "documents",
-          "check_clause": "status IS NOT NULL",
-          "constraint_name": "2200_17494_7_not_null"
+          "check_clause": "user_id IS NOT NULL",
+          "constraint_name": "2200_17494_2_not_null"
         },
         {
           "table_name": "documents",
@@ -1171,18 +1662,58 @@
         },
         {
           "table_name": "documents",
-          "check_clause": "user_id IS NOT NULL",
-          "constraint_name": "2200_17494_2_not_null"
+          "check_clause": "status IS NOT NULL",
+          "constraint_name": "2200_17494_7_not_null"
         },
         {
-          "table_name": "material_facts",
+          "table_name": "documents",
+          "check_clause": "error_blocks_count IS NOT NULL",
+          "constraint_name": "2200_17494_8_not_null"
+        },
+        {
+          "table_name": "documents",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_17494_12_not_null"
+        },
+        {
+          "table_name": "documents",
           "check_clause": "updated_at IS NOT NULL",
-          "constraint_name": "2200_17548_18_not_null"
+          "constraint_name": "2200_17494_13_not_null"
         },
         {
-          "table_name": "material_facts",
+          "table_name": "llm_prompts",
+          "check_clause": "key IS NOT NULL",
+          "constraint_name": "2200_21117_2_not_null"
+        },
+        {
+          "table_name": "llm_prompts",
+          "check_clause": "name IS NOT NULL",
+          "constraint_name": "2200_21117_3_not_null"
+        },
+        {
+          "table_name": "llm_prompts",
+          "check_clause": "system_prompt IS NOT NULL",
+          "constraint_name": "2200_21117_5_not_null"
+        },
+        {
+          "table_name": "llm_prompts",
+          "check_clause": "is_active IS NOT NULL",
+          "constraint_name": "2200_21117_7_not_null"
+        },
+        {
+          "table_name": "llm_prompts",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_21117_8_not_null"
+        },
+        {
+          "table_name": "llm_prompts",
+          "check_clause": "updated_at IS NOT NULL",
+          "constraint_name": "2200_21117_9_not_null"
+        },
+        {
+          "table_name": "llm_prompts",
           "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_17548_1_not_null"
+          "constraint_name": "2200_21117_1_not_null"
         },
         {
           "table_name": "material_facts",
@@ -1215,14 +1746,59 @@
           "constraint_name": "2200_17548_17_not_null"
         },
         {
-          "table_name": "projects",
-          "check_clause": "name IS NOT NULL",
-          "constraint_name": "2200_20979_2_not_null"
+          "table_name": "material_facts",
+          "check_clause": "updated_at IS NOT NULL",
+          "constraint_name": "2200_17548_18_not_null"
+        },
+        {
+          "table_name": "material_facts",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_17548_1_not_null"
+        },
+        {
+          "table_name": "product_facts",
+          "check_clause": "doc_id IS NOT NULL",
+          "constraint_name": "2200_22269_2_not_null"
+        },
+        {
+          "table_name": "product_facts",
+          "check_clause": "updated_at IS NOT NULL",
+          "constraint_name": "2200_22269_16_not_null"
+        },
+        {
+          "table_name": "product_facts",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_22269_15_not_null"
+        },
+        {
+          "table_name": "product_facts",
+          "check_clause": "user_verified IS NOT NULL",
+          "constraint_name": "2200_22269_14_not_null"
+        },
+        {
+          "table_name": "product_facts",
+          "check_clause": "confidence IS NOT NULL",
+          "constraint_name": "2200_22269_13_not_null"
+        },
+        {
+          "table_name": "product_facts",
+          "check_clause": "source_section IS NOT NULL",
+          "constraint_name": "2200_22269_9_not_null"
+        },
+        {
+          "table_name": "product_facts",
+          "check_clause": "assembly_mark IS NOT NULL",
+          "constraint_name": "2200_22269_4_not_null"
+        },
+        {
+          "table_name": "product_facts",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_22269_1_not_null"
         },
         {
           "table_name": "projects",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_20979_1_not_null"
+          "check_clause": "name IS NOT NULL",
+          "constraint_name": "2200_20979_2_not_null"
         },
         {
           "table_name": "projects",
@@ -1231,13 +1807,13 @@
         },
         {
           "table_name": "projects",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_20979_5_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_20979_1_not_null"
         },
         {
-          "table_name": "sections",
-          "check_clause": "code IS NOT NULL",
-          "constraint_name": "2200_20989_2_not_null"
+          "table_name": "projects",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_20979_5_not_null"
         },
         {
           "table_name": "sections",
@@ -1251,23 +1827,23 @@
         },
         {
           "table_name": "sections",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_20989_1_not_null"
+        },
+        {
+          "table_name": "sections",
           "check_clause": "created_at IS NOT NULL",
           "constraint_name": "2200_20989_5_not_null"
         },
         {
           "table_name": "sections",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_20989_1_not_null"
+          "check_clause": "code IS NOT NULL",
+          "constraint_name": "2200_20989_2_not_null"
         },
         {
           "table_name": "statement_items",
           "check_clause": "canonical_name IS NOT NULL",
           "constraint_name": "2200_20932_4_not_null"
-        },
-        {
-          "table_name": "statement_items",
-          "check_clause": "canonical_key IS NOT NULL",
-          "constraint_name": "2200_20932_3_not_null"
         },
         {
           "table_name": "statement_items",
@@ -1288,6 +1864,11 @@
           "table_name": "statement_items",
           "check_clause": "fact_count IS NOT NULL",
           "constraint_name": "2200_20932_7_not_null"
+        },
+        {
+          "table_name": "statement_items",
+          "check_clause": "canonical_key IS NOT NULL",
+          "constraint_name": "2200_20932_3_not_null"
         },
         {
           "table_name": "statements",
@@ -1322,10 +1903,25 @@
         {
           "columns": [
             "doc_id",
+            "code"
+          ],
+          "table_name": "doc_glossary",
+          "constraint_name": "doc_glossary_doc_id_code_key"
+        },
+        {
+          "columns": [
+            "doc_id",
             "page_no"
           ],
           "table_name": "doc_pages",
           "constraint_name": "doc_pages_doc_id_page_no_key"
+        },
+        {
+          "columns": [
+            "key"
+          ],
+          "table_name": "llm_prompts",
+          "constraint_name": "llm_prompts_key_key"
         },
         {
           "columns": [

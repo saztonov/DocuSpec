@@ -23,6 +23,38 @@ export const ExtractionResponseSchema = z.object({
 export type MaterialFactItem = z.infer<typeof MaterialFactItemSchema>;
 export type ExtractionResponse = z.infer<typeof ExtractionResponseSchema>;
 
+// ── Glossary types (Pass 0) ──
+
+export const GlossaryItemSchema = z.object({
+  code: z.string().min(1),
+  item_type: z.enum(['material', 'assembly', 'construction', 'location', 'color']),
+  description: z.string().nullable().optional(),
+});
+
+export const GlossaryResponseSchema = z.object({
+  glossary: z.array(GlossaryItemSchema),
+});
+
+export type GlossaryItem = z.infer<typeof GlossaryItemSchema>;
+export type GlossaryResponse = z.infer<typeof GlossaryResponseSchema>;
+
+// Map: code → GlossaryItem, built from doc_glossary after Pass 0
+export type GlossaryMap = Map<string, GlossaryItem>;
+
+// ── Product fact item (изделие/сборная единица) ──
+
+export interface ProductFactItem {
+  assembly_mark: string;
+  assembly_name: string | null;
+  canonical_key: string | null;
+  quantity: number | null;
+  unit: string | null;
+  description: string | null;
+  note: string | null;
+  source_snippet: string | null;
+  confidence: number;
+}
+
 export type TableCategory =
   | 'material_qty'
   | 'spec_elements'
@@ -35,10 +67,11 @@ export type TableCategory =
   | 'drawing_list'
   | 'vedomost_materialov'
   | 'vedomost_izdelij'
+  | 'assembly_spec'
   | 'unknown';
 
 export interface ExtractionProgress {
-  status: 'idle' | 'rule_based' | 'llm_extracting' | 'merging' | 'saving' | 'done' | 'error';
+  status: 'idle' | 'glossary' | 'rule_based' | 'llm_extracting' | 'merging' | 'saving' | 'done' | 'error';
   phase?: string;
   completedBatches: number;
   totalBatches: number;
