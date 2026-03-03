@@ -6,6 +6,10 @@ import { generateCanonicalKey } from './canonical.ts';
 import { callLlmJson, buildImageMessage } from './llm.ts';
 import type { ExtractionLogger } from './extractionLogger.ts';
 
+// ── JSON format suffix (appended to system prompts for all extraction LLM calls) ──
+
+const JSON_FORMAT_SUFFIX = '\n\nRESPONSE FORMAT: Return ONLY a valid JSON object: {"items": [...]}. The root element MUST be an object with an "items" key containing the array of extracted items. Do NOT return a bare array.';
+
 // ── Fallback prompts (used if DB prompts are unavailable) ──
 
 export const FALLBACK_PROMPT_UNIVERSAL = `You are a construction BOM (Bill of Materials) extractor for Russian architectural documentation.
@@ -473,18 +477,21 @@ export async function llmExtractBatch(
 
     const userPrompt = buildUserPrompt(block, pageNo, sectionContext);
 
+    let rawContent = '';
     try {
       const response = await callLlmJson({
         messages: [
-          { role: 'system', content: systemPrompt },
+          { role: 'system', content: systemPrompt + JSON_FORMAT_SUFFIX },
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.1,
         model,
       });
 
-      const parsed = JSON.parse(response.content);
-      const validated = ExtractionResponseSchema.parse(parsed);
+      rawContent = response.content;
+      const parsed = JSON.parse(rawContent);
+      const normalized = Array.isArray(parsed) ? { items: parsed } : parsed;
+      const validated = ExtractionResponseSchema.parse(normalized);
 
       const validItems = validated.items.filter(item => item.source_snippet);
       const droppedBySnippet = validated.items.filter(item => !item.source_snippet);
@@ -497,7 +504,7 @@ export async function llmExtractBatch(
 
       logger?.logLlmCall(
         block.uid, 'TEXT', phase ?? '',
-        Object.keys(parsed), validItems.length,
+        Object.keys(normalized), validItems.length,
         response.usage ?? null, response.hasImage, response.durationMs,
       );
 
@@ -507,11 +514,11 @@ export async function llmExtractBatch(
         phase: phase ?? '',
         systemPrompt,
         userPrompt,
-        rawResponse: response.content,
+        rawResponse: rawContent,
         parsedItemsCount: validated.items.length,
         validItemsCount: validItems.length,
         droppedItems: droppedBySnippet.map(item => ({ raw_name: item.raw_name, reason: 'no_source_snippet' })),
-        responseKeys: Object.keys(parsed),
+        responseKeys: Object.keys(normalized),
         usage: response.usage ?? null,
         hasImage: response.hasImage,
         durationMs: response.durationMs,
@@ -520,7 +527,7 @@ export async function llmExtractBatch(
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`LLM extraction failed for block ${block.uid}:`, err);
       results.set(blockDbId, []);
-      logger?.logLlmError(block.uid, 'TEXT', phase ?? '', errMsg, systemPrompt, userPrompt);
+      logger?.logLlmError(block.uid, 'TEXT', phase ?? '', errMsg, systemPrompt, userPrompt, rawContent);
     }
 
     onProgress?.(i + 1, blocks.length);
@@ -547,20 +554,25 @@ export async function llmExtractImageBlock(
 
   const textContent = buildUserPrompt(block, pageNo, sectionContext);
 
+  const systemPromptWithFormat = systemPrompt + JSON_FORMAT_SUFFIX;
+
   const messages = imageUrl
     ? [
-        { role: 'system' as const, content: systemPrompt },
+        { role: 'system' as const, content: systemPromptWithFormat },
         buildImageMessage(imageUrl, textContent),
       ]
     : [
-        { role: 'system' as const, content: systemPrompt },
+        { role: 'system' as const, content: systemPromptWithFormat },
         { role: 'user' as const, content: textContent },
       ];
 
+  let rawContent = '';
   try {
     const response = await callLlmJson({ messages, temperature: 0.1, model });
-    const parsed = JSON.parse(response.content);
-    const validated = ExtractionResponseSchema.parse(parsed);
+    rawContent = response.content;
+    const parsed = JSON.parse(rawContent);
+    const normalized = Array.isArray(parsed) ? { items: parsed } : parsed;
+    const validated = ExtractionResponseSchema.parse(normalized);
 
     const validItems = validated.items.filter(item => item.source_snippet);
     const droppedBySnippet = validated.items.filter(item => !item.source_snippet);
@@ -571,7 +583,7 @@ export async function llmExtractImageBlock(
 
     logger?.logLlmCall(
       block.uid, 'IMAGE', 'Фаза 3',
-      Object.keys(parsed), validItems.length,
+      Object.keys(normalized), validItems.length,
       response.usage ?? null, !!imageUrl, response.durationMs,
     );
 
@@ -581,11 +593,11 @@ export async function llmExtractImageBlock(
       phase: 'Фаза 3',
       systemPrompt,
       userPrompt: textContent,
-      rawResponse: response.content,
+      rawResponse: rawContent,
       parsedItemsCount: validated.items.length,
       validItemsCount: validItems.length,
       droppedItems: droppedBySnippet.map(item => ({ raw_name: item.raw_name, reason: 'no_source_snippet' })),
-      responseKeys: Object.keys(parsed),
+      responseKeys: Object.keys(normalized),
       usage: response.usage ?? null,
       hasImage: !!imageUrl,
       durationMs: response.durationMs,
@@ -595,7 +607,7 @@ export async function llmExtractImageBlock(
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`LLM image extraction failed for block ${blockDbId}:`, err);
-    logger?.logLlmError(block.uid, 'IMAGE', 'Фаза 3', errMsg, systemPrompt, textContent);
+    logger?.logLlmError(block.uid, 'IMAGE', 'Фаза 3', errMsg, systemPrompt, textContent, rawContent);
     return [];
   }
 }

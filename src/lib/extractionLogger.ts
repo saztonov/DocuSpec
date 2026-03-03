@@ -307,7 +307,7 @@ export class ExtractionLogger {
     this.detailedCalls.push({ ...entry, timestamp: new Date().toISOString() });
   }
 
-  logLlmError(blockUid: string, blockType: string, phase: string, error: string, systemPrompt: string, userPrompt: string): void {
+  logLlmError(blockUid: string, blockType: string, phase: string, error: string, systemPrompt: string, userPrompt: string, rawResponse?: string): void {
     this.detailedCalls.push({
       timestamp: new Date().toISOString(),
       blockUid,
@@ -315,7 +315,7 @@ export class ExtractionLogger {
       phase,
       systemPrompt,
       userPrompt,
-      rawResponse: '',
+      rawResponse: rawResponse || '',
       parsedItemsCount: 0,
       validItemsCount: 0,
       droppedItems: [],

@@ -1,0 +1,698 @@
+{
+  "version": "1.0",
+  "documentName": "133_23-ГК-ОЗДС (от 17.06.25)_document.md",
+  "documentId": "5413189d-54d6-4ac9-a812-258164daf9c1",
+  "startTime": "2026-03-03T14:38:56.753Z",
+  "endTime": "2026-03-03T14:40:01.531Z",
+  "durationMs": 64778,
+  "model": "google/gemini-3-flash-preview",
+  "prompts": {
+    "universal": "You are a construction BOM (Bill of Materials) extractor for Russian architectural documentation.\r\nYour task is to extract materials, components, and quantities from the provided content.\r\n\r\nANALYSE THE CONTENT STRUCTURE FIRST:\r\nDetermine what type of content you are looking at:\r\nA) \"Ведомость материалов\" / \"Сводная ведомость материалов\" — a material inventory list with quantities\r\nB) \"Спецификация элементов\" — a specification of assembly components (e.g., each railing ОГ-13 has sub-components)\r\nC) \"Ведомость изделий\" — an inventory of finished assemblies/products (e.g., list of railings ОГ-13, ОГ-14 with lengths)\r\nD) Other table with materials/quantities\r\n\r\nRULES:\r\n1. Extract ONLY materials/elements explicitly mentioned in the content.\r\n2. DO NOT invent or hallucinate materials not present in the source.\r\n3. Fix common OCR errors: \"спилобата\"→\"стилобата\", \"Tun\"→\"Тип\", \"опм.\"→\"отм.\"\r\n4. For canonical_name: normalize the material name (fix typos, standardize, remove \"или аналог\").\r\n5. For canonical_key: create a lowercase Latin slug (transliterate Russian, replace spaces with underscores).\r\n6. Parse Russian numeric format: \"202,6\" means 202.6; \"1 692,9\" means 1692.9.\r\n7. Unit should be standardized: м2, м3, шт, м.п., кг, т, л, компл.\r\n8. \"мм\" is a THICKNESS, not a quantity unit — put thickness in description field.\r\n9. DO NOT extract normative documents (ГОСТ, СП, СНиП, ФЗ, Постановление) as materials.\r\n10. DO NOT extract section headers or generic category names.\r\n11. DO NOT extract cross-references (see раздел, см. лист, см. 133/23...).\r\n\r\nFOR TYPE C (Ведомость изделий — assemblies like ОГ-13, ОГ-14 with counts/lengths):\r\n- Return {\"items\": []} — assemblies are NOT individual materials.\r\n\r\nFOR TYPE B (Спецификация элементов — components grouped under an assembly):\r\n- \"construction\" field = the assembly name/mark (e.g., \"ОГ-13\", \"ОГ-14\", \"Витраж В-1\")\r\n- \"raw_name\" = the component material (e.g., \"Стальная труба 30x15x2 мм\")\r\n- Group headers like \"ОГ-13, L=4 700\" are assembly identifiers, NOT materials\r\n\r\nFOR TYPES A and D:\r\n- \"construction\" field = the structural element or location this material belongs to (e.g., \"Отделка стены\", \"Ступень дорожная\", \"Фпод.п-1\"), or null if no clear parent element\r\n- Extract each material row as a separate item\r\n\r\nEach item in the \"items\" array must have this structure:\r\n{\r\n  \"raw_name\": \"exact name from document\",\r\n  \"canonical_name\": \"normalized Russian name\",\r\n  \"canonical_key\": \"latin_slug_key\",\r\n  \"construction\": \"parent assembly or structural element name, or null\",\r\n  \"extra_params\": \"color RAL, additional specs, or null\",\r\n  \"quantity\": 123.4 or null,\r\n  \"unit\": \"м2\" or null,\r\n  \"mark\": \"position/mark identifier\" or null,\r\n  \"gost\": \"ГОСТ reference\" or null,\r\n  \"description\": \"thickness or additional description\" or null,\r\n  \"note\": \"remarks from примечание column\" or null,\r\n  \"source_snippet\": \"exact quote from source proving this item exists\",\r\n  \"confidence\": 0.9\r\n}",
+    "layerCake": "You are extracting construction layer cakes (строительные \"пироги\") from Russian architectural cross-section drawings.\r\n\r\nYour input is a description of a cross-section, section, or detail drawing with text annotations.\r\n\r\nTASK: Extract the ordered list of construction layers (пирог) described in the drawing text.\r\n\r\nRULES:\r\n1. Look for layer descriptions in \"Текст на чертеже:\" section — these are the most reliable.\r\n2. A layer description typically includes: material name + thickness (e.g., \"Облицовка плитами натурального камня - гранит на клею -20мм\").\r\n3. Each layer = one item in the output.\r\n4. \"construction\" field = the name/identifier of the cross-section (e.g., \"Сечение Л7-Л7\", \"Узел А-А\", \"Разрез 1-1\").\r\n5. \"raw_name\" = the layer material (e.g., \"Облицовка плитами натурального камня - гранит\").\r\n6. \"description\" = thickness if mentioned (e.g., \"20 мм\").\r\n7. \"quantity\" = null (layers don't have quantities in cross-sections).\r\n8. \"unit\" = null.\r\n9. \"note\" = any reference to another document (e.g., \"см. 133/23-ГК-КЖ23\").\r\n10. Preserve the layer ORDER as it appears in the drawing (top to bottom or outside to inside).\r\n11. DO NOT extract dimensional annotations, axis labels, or elevation marks as layers.\r\n12. DO NOT extract cross-references to other sheets (люк-лаз, стремянка, etc.) as layers.\r\n13. If no layer cake structure is found (only dimensions/axes), return {\"items\": []}.\r\n14. If the drawing text is ambiguous and an image is provided, use it to verify the layer sequence.\r\n\r\nEach item in the \"items\" array must have this structure:\r\n{\r\n  \"raw_name\": \"layer material name\",\r\n  \"canonical_name\": \"normalized Russian name\",\r\n  \"canonical_key\": \"latin_slug_key\",\r\n  \"construction\": \"cross-section name from drawing header\",\r\n  \"extra_params\": null,\r\n  \"quantity\": null,\r\n  \"unit\": null,\r\n  \"mark\": null,\r\n  \"gost\": null,\r\n  \"description\": \"thickness in mm if mentioned, e.g. '20 мм'\",\r\n  \"note\": \"reference to other document if any\",\r\n  \"source_snippet\": \"exact quote from drawing text\",\r\n  \"confidence\": 0.85\r\n}",
+    "glossary": "You are analyzing Russian architectural documentation to extract a glossary of all codes, abbreviations, and marks used.\r\n\r\nTASK: Scan the provided content and extract all codes/marks/abbreviations with their type classification.\r\n\r\nTYPES:\r\n- \"assembly\" — a finished product/assembly identified by a mark (e.g., ОГ-13, ОГ-14, В-1):\r\n  * Has a numeric suffix after a letter prefix: ОГ-13, ОГ-19, В-1, ЩА-1\r\n  * Listed in \"Ведомость изделий/ограждений\" sections\r\n  * Appears as a group header in spec tables: \"ОГ-13, L=4 700\"\r\n  * Counted in whole units (шт) or linear meters (м.п.) as a finished product\r\n- \"construction\" — a structural element or location code:\r\n  * Appears in Поз. column of facade/floor/finish specifications\r\n  * Examples: Фпод.п-1, Фр-1, Фст-1, Н4, ОС-1\r\n  * Represents a location/zone, NOT a product\r\n- \"material\" — a raw material code (rare; usually materials have full names)\r\n- \"location\" — a room or zone identifier (e.g., А1-1, Зал №3)\r\n- \"color\" — a color standard code (e.g., RAL 9001, RAL-8002, RAL 8002)\r\n\r\nRULES:\r\n1. Only extract CODES/ABBREVIATIONS, NOT full material names like \"Облицовочный натуральный камень\".\r\n2. A code typically matches: [2-5 Cyrillic/Latin letters][optional ./-][digits] OR \"RAL [digits]\".\r\n3. Include each code only ONCE (deduplicate).\r\n4. For assemblies: use base mark WITHOUT dimensions (ОГ-13, NOT \"ОГ-13, L=4 700\").\r\n5. Return ONLY valid JSON. No text, no markdown, no explanation outside JSON.\r\n\r\nReturn exactly this format:\r\n{\"glossary\": [{\"code\": \"ОГ-13\", \"item_type\": \"assembly\", \"description\": \"Стальное ограждение\"}, {\"code\": \"RAL 9001\", \"item_type\": \"color\", \"description\": \"Кремово-белый\"}]}\r\n\r\nIf no codes found: {\"glossary\": []}"
+  },
+  "parsing": {
+    "totalPages": 15,
+    "totalBlocks": 40,
+    "textBlocks": 21,
+    "imageBlocks": 19,
+    "errorBlocks": 1
+  },
+  "classification": {
+    "summary": {
+      "vedomost": 0,
+      "spec": 6,
+      "assembly": 0,
+      "products": 0,
+      "images": 3,
+      "skipped": 31,
+      "total": 40
+    },
+    "details": [
+      {
+        "blockUid": "4YFW-TNJQ-TGL",
+        "blockType": "TEXT",
+        "pageNo": 1,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Нет таблиц и нет паттерна количества"
+      },
+      {
+        "blockUid": "AR4X-7DQX-WP7",
+        "blockType": "TEXT",
+        "pageNo": 2,
+        "sectionTitle": "РАБОЧАЯ ДОКУМЕНТАЦИЯ",
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Нет таблиц и нет паттерна количества"
+      },
+      {
+        "blockUid": "9KGU-XL9H-WNQ",
+        "blockType": "TEXT",
+        "pageNo": 3,
+        "sectionTitle": "000 \"Самел\"",
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Нет таблиц и нет паттерна количества"
+      },
+      {
+        "blockUid": "4YWU-YKDN-4L9",
+        "blockType": "TEXT",
+        "pageNo": 4,
+        "sectionTitle": "ООО \"Сател\"",
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Нет таблиц и нет паттерна количества"
+      },
+      {
+        "blockUid": "43DA-A6GW-4WH",
+        "blockType": "TEXT",
+        "pageNo": 5,
+        "sectionTitle": "Ведомость основных комплектов рабочих чертежей. ОЗДС",
+        "tableCategories": [
+          "reference_docs"
+        ],
+        "assignedPhase": "skipped",
+        "skipReason": "Таблицы [reference_docs] не extractable"
+      },
+      {
+        "blockUid": "7L6U-FPMA-EKY",
+        "blockType": "TEXT",
+        "pageNo": 5,
+        "sectionTitle": "Ведомость чертежей основного комплекта",
+        "tableCategories": [
+          "drawing_list"
+        ],
+        "assignedPhase": "skipped",
+        "skipReason": "Таблицы [drawing_list] не extractable"
+      },
+      {
+        "blockUid": "JXED-6LAR-K7H",
+        "blockType": "TEXT",
+        "pageNo": 5,
+        "sectionTitle": "Ведомость ссылочных и прилагаемых документов",
+        "tableCategories": [
+          "reference_docs"
+        ],
+        "assignedPhase": "skipped",
+        "skipReason": "Таблицы [reference_docs] не extractable"
+      },
+      {
+        "blockUid": "7CH9-HHT6-NFH",
+        "blockType": "TEXT",
+        "pageNo": 5,
+        "sectionTitle": "Общая часть",
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Нет таблиц и нет паттерна количества"
+      },
+      {
+        "blockUid": "93TA-UFYV-639",
+        "blockType": "TEXT",
+        "pageNo": 5,
+        "sectionTitle": "2. Указания по монтажу",
+        "tableCategories": [],
+        "assignedPhase": "spec(text)"
+      },
+      {
+        "blockUid": "A3G3-4TDJ-7YH",
+        "blockType": "TEXT",
+        "pageNo": 5,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Нет таблиц и нет паттерна количества"
+      },
+      {
+        "blockUid": "94Y4-W3JL-6G9",
+        "blockType": "IMAGE",
+        "pageNo": 5,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE тип: легенда/план"
+      },
+      {
+        "blockUid": "4WF7-RYMP-ENL",
+        "blockType": "IMAGE",
+        "pageNo": 6,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE не разрез/сечение/узел"
+      },
+      {
+        "blockUid": "4YFV-HA9Y-XDP",
+        "blockType": "IMAGE",
+        "pageNo": 7,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE не разрез/сечение/узел"
+      },
+      {
+        "blockUid": "4JLY-JUH9-VJX",
+        "blockType": "TEXT",
+        "pageNo": 7,
+        "sectionTitle": null,
+        "tableCategories": [
+          "unknown"
+        ],
+        "assignedPhase": "spec"
+      },
+      {
+        "blockUid": "EH36-YCC4-D7U",
+        "blockType": "IMAGE",
+        "pageNo": 8,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE тип: легенда/план"
+      },
+      {
+        "blockUid": "4497-74VA-LGE",
+        "blockType": "TEXT",
+        "pageNo": 8,
+        "sectionTitle": null,
+        "tableCategories": [
+          "unknown"
+        ],
+        "assignedPhase": "spec"
+      },
+      {
+        "blockUid": "9YW7-97MQ-PLT",
+        "blockType": "TEXT",
+        "pageNo": 8,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Нет таблиц и нет паттерна количества"
+      },
+      {
+        "blockUid": "9LCC-VCM9-YP4",
+        "blockType": "IMAGE",
+        "pageNo": 8,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Ошибка: [Ошибка OpenRouter 429: Превышен лимит запросов]"
+      },
+      {
+        "blockUid": "94HY-TDHF-GEL",
+        "blockType": "IMAGE",
+        "pageNo": 8,
+        "sectionTitle": "УСЛОВНЫЕ ОБОЗНАЧЕНИЯ:",
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE тип: легенда/план"
+      },
+      {
+        "blockUid": "4U3H-TM6M-DFM",
+        "blockType": "TEXT",
+        "pageNo": 8,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Нет таблиц и нет паттерна количества"
+      },
+      {
+        "blockUid": "QM4L-V9YU-NQC",
+        "blockType": "TEXT",
+        "pageNo": 9,
+        "sectionTitle": null,
+        "tableCategories": [
+          "room_schedule"
+        ],
+        "assignedPhase": "skipped",
+        "skipReason": "Таблицы [room_schedule] не extractable"
+      },
+      {
+        "blockUid": "6EW9-DNUJ-MKU",
+        "blockType": "IMAGE",
+        "pageNo": 9,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE не разрез/сечение/узел"
+      },
+      {
+        "blockUid": "HNRN-7QTX-WMR",
+        "blockType": "IMAGE",
+        "pageNo": 9,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE тип: легенда/план"
+      },
+      {
+        "blockUid": "4LWU-4RYR-RN9",
+        "blockType": "TEXT",
+        "pageNo": 9,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Нет таблиц и нет паттерна количества"
+      },
+      {
+        "blockUid": "7PYT-TYRK-J44",
+        "blockType": "IMAGE",
+        "pageNo": 9,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE тип: легенда/план"
+      },
+      {
+        "blockUid": "9W6C-GM49-KYY",
+        "blockType": "IMAGE",
+        "pageNo": 10,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE не разрез/сечение/узел"
+      },
+      {
+        "blockUid": "6UMW-N6EX-DMA",
+        "blockType": "IMAGE",
+        "pageNo": 10,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE не разрез/сечение/узел"
+      },
+      {
+        "blockUid": "FLUR-P76Y-CH4",
+        "blockType": "IMAGE",
+        "pageNo": 10,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "image"
+      },
+      {
+        "blockUid": "44WK-XPV7-39L",
+        "blockType": "TEXT",
+        "pageNo": 10,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Нет таблиц и нет паттерна количества"
+      },
+      {
+        "blockUid": "94LC-LTWY-7AP",
+        "blockType": "IMAGE",
+        "pageNo": 11,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE не разрез/сечение/узел"
+      },
+      {
+        "blockUid": "6LME-7YKG-JYA",
+        "blockType": "IMAGE",
+        "pageNo": 11,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE не разрез/сечение/узел"
+      },
+      {
+        "blockUid": "LD9P-6FHG-VF7",
+        "blockType": "IMAGE",
+        "pageNo": 11,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE не разрез/сечение/узел"
+      },
+      {
+        "blockUid": "6XGM-3A6W-7GQ",
+        "blockType": "TEXT",
+        "pageNo": 11,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "Нет таблиц и нет паттерна количества"
+      },
+      {
+        "blockUid": "9L6J-TKX6-KC9",
+        "blockType": "IMAGE",
+        "pageNo": 12,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE не разрез/сечение/узел"
+      },
+      {
+        "blockUid": "4UXD-CRCK-R7A",
+        "blockType": "IMAGE",
+        "pageNo": 12,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "image"
+      },
+      {
+        "blockUid": "XXVK-FQAF-TVC",
+        "blockType": "IMAGE",
+        "pageNo": 12,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "skipped",
+        "skipReason": "IMAGE не разрез/сечение/узел"
+      },
+      {
+        "blockUid": "9GWH-DK7G-7RH",
+        "blockType": "IMAGE",
+        "pageNo": 12,
+        "sectionTitle": null,
+        "tableCategories": [],
+        "assignedPhase": "image"
+      },
+      {
+        "blockUid": "99CC-U9EW-X7M",
+        "blockType": "TEXT",
+        "pageNo": 13,
+        "sectionTitle": null,
+        "tableCategories": [
+          "unknown"
+        ],
+        "assignedPhase": "spec"
+      },
+      {
+        "blockUid": "YDK7-G93T-9TL",
+        "blockType": "TEXT",
+        "pageNo": 14,
+        "sectionTitle": null,
+        "tableCategories": [
+          "unknown"
+        ],
+        "assignedPhase": "spec"
+      },
+      {
+        "blockUid": "9ACR-NUTX-HQ3",
+        "blockType": "TEXT",
+        "pageNo": 15,
+        "sectionTitle": null,
+        "tableCategories": [
+          "unknown"
+        ],
+        "assignedPhase": "spec"
+      }
+    ]
+  },
+  "llmCalls": [
+    {
+      "blockUid": "chunk_1/1",
+      "blockType": "glossary",
+      "phase": "Pass 0",
+      "systemPrompt": "You are analyzing Russian architectural documentation to extract a glossary of all codes, abbreviations, and marks used.\r\n\r\nTASK: Scan the provided content and extract all codes/marks/abbreviations with their type classification.\r\n\r\nTYPES:\r\n- \"assembly\" — a finished product/assembly identified by a mark (e.g., ОГ-13, ОГ-14, В-1):\r\n  * Has a numeric suffix after a letter prefix: ОГ-13, ОГ-19, В-1, ЩА-1\r\n  * Listed in \"Ведомость изделий/ограждений\" sections\r\n  * Appears as a group header in spec tables: \"ОГ-13, L=4 700\"\r\n  * Counted in whole units (шт) or linear meters (м.п.) as a finished product\r\n- \"construction\" — a structural element or location code:\r\n  * Appears in Поз. column of facade/floor/finish specifications\r\n  * Examples: Фпод.п-1, Фр-1, Фст-1, Н4, ОС-1\r\n  * Represents a location/zone, NOT a product\r\n- \"material\" — a raw material code (rare; usually materials have full names)\r\n- \"location\" — a room or zone identifier (e.g., А1-1, Зал №3)\r\n- \"color\" — a color standard code (e.g., RAL 9001, RAL-8002, RAL 8002)\r\n\r\nRULES:\r\n1. Only extract CODES/ABBREVIATIONS, NOT full material names like \"Облицовочный натуральный камень\".\r\n2. A code typically matches: [2-5 Cyrillic/Latin letters][optional ./-][digits] OR \"RAL [digits]\".\r\n3. Include each code only ONCE (deduplicate).\r\n4. For assemblies: use base mark WITHOUT dimensions (ОГ-13, NOT \"ОГ-13, L=4 700\").\r\n5. Return ONLY valid JSON. No text, no markdown, no explanation outside JSON.\r\n\r\nReturn exactly this format:\r\n{\"glossary\": [{\"code\": \"ОГ-13\", \"item_type\": \"assembly\", \"description\": \"Стальное ограждение\"}, {\"code\": \"RAL 9001\", \"item_type\": \"color\", \"description\": \"Кремово-белый\"}]}\r\n\r\nIf no codes found: {\"glossary\": []}",
+      "userPrompt": "[Block 4YFW-TNJQ-TGL]\nОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ\n«ГРУППА КОМПАНИЙ «ОЛИМПРОЕКТ»\nРАБОЧАЯ ДОКУМЕНТАЦИЯ\nОхранно-защитная дератизационная система\n133/23-ГК-ОЗДС\n**ОБЪЕКТ:** Жилой комплекс, расположенный по адресу: г. Москва,\nМосфильмовская ул., вл. 31А\n**ЗАКАЗЧИК:** ООО «СЗ «ОКТЯБРЬ-ДЕВЕЛОПМЕНТ»\nВ ПРОИЗВОДСТВО РАБОТ\nООО \"СР.Девелопмент\"\nГИП\nЕгоров А.С. 17.06.2025\n\n---\n\n[Block AR4X-7DQX-WP7]\nОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ\n«ГРУППА КОМПАНИЙ «ОЛИМПРОЕКТ»\n##### РАБОЧАЯ ДОКУМЕНТАЦИЯ\nОхранно-защитная дератизационная система\n133/23-ГК-ОЗДС\n**ОБЪЕКТ:** Жилой комплекс, расположенный по адресу: г. Москва, Мосфильмовская ул., вл. 31А\n**ЗАКАЗЧИК:** ООО «СЗ «ОКТЯБРЬ-ДЕВЕЛОПМЕНТ»\nВ ПРОИЗВОДСТВЕ РАБОТ\nООО «СЗ «ОКТЯБРЬ-ДЕВЕЛОПМЕНТ»\nГИП\nЕгоров\nС ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ\nГРУППА КОМПАНИЙ\n«ОЛИМПРОЕКТ»\nМОСКВА • ТЕЛ. 495-763-30-00\nИНН 7711777777\nН.Ю.\nА.Д. Григорьев\nА.Н. Якубовский\n\n---\n\n[Block 9KGU-XL9H-WNQ]\n#### 000 \"Самел\"\nВыписка из реестра членов саморегулируемой организации №7715559657-20250411-1223 от 11.04.2025 г.\n«Жилой комплекс, расположенный по адресу: г. Москва, Мосфильмовская ул., вл. 31А, размещаемый на земельном участке, кадастровый № 77:07:0010004:24 (адресный ориентир: г. Москва, Мосфильмовская ул., вл. 31А»\n##### РАБОЧАЯ ДОКУМЕНТАЦИЯ\nОхранно-защитная дератизационная система\n\n---\n\n[Block 4YWU-YKDN-4L9]\n#### ООО \"Сател\"\nВыписка из реестра членов саморегулируемой организации №7715559657-20250411-1223 от 11.04.2025 г.\n«Жилой комплекс, расположенный по адресу: г. Москва, Мосфильмовская ул., вл. 31А, размещаемый на земельном участке, кадастровый № 77:07:0010004:24 (адресный ориентир: г. Москва, Мосфильмовская ул., вл. 31А»\n##### РАБОЧАЯ ДОКУМЕНТАЦИЯ\nОхранно-защитная дератизационная система\n133/23-ГК-03ДС\nВ ПРОИЗВОДСТВО РАБОТ\nООО \"СР.Девелопмент\"\nГИП\nЕгоров А.С. 17.06.2025\nГлавный инженер проекта\nТ. А. Шмелькова\n\n---\n\n[Block 43DA-A6GW-4WH]\n##### Ведомость основных комплектов рабочих чертежей. ОЗДС\n\n| Обозначение | Наименование | Примечание |\n|---|---|---|\n| 133/23-ГК-ОЗДС | Охранно-защитная дератизационная система | |\n\n---\n\n[Block 7L6U-FPMA-EKY]\n##### Ведомость чертежей основного комплекта\n\n| Лист | Наименование | Примечание |\n|---|---|---|\n| 1 | Общие данные | |\n| 2 | Схема подключения оборудования ОЗДС. ДР-1 | |\n| 3 | Схема подключения оборудования ОЗДС. ДР-2 | |\n| 4 | План расположения оборудования ОЗДС и трасса прокладки кабелей на -2-м этаже на отм. -7,650 | |\n| 5 | План расположения оборудования ОЗДС и трасса прокладки кабелей на -1-м этаже на отм. -3,750 | |\n| 6 | Типовые решения по монтажу блоков ДР и ВУ | |\n| 7 | Типовые решения по блокировке входов от проникновения грызунов (начало) | |\n| 8 | Типовые решения по блокировке входов от проникновения грызунов (окончание) | |\n| 9 | Кабельный журнал | 1 лист |\n\n---\n\n[Block JXED-6LAR-K7H]\n##### Ведомость ссылочных и прилагаемых документов\n\n| Обозначение | Наименование | Примечание |\n|---|---|---|\n| Ссылочные документы | | |\n| СанПиН 3.3686-21 | “Санитарно-эпидемиологические требованияпо профилактике инфекционных болезней” | |\n| PM-2776 | Инструкция по проектированию, монтажу и приемкев эксплуатацию охранно-защитных дератизационныхсистем (ОЗДС) | |\n| ФЗ РФ №52 | Федеральный закон от 30.03.1999 (ред. от 30.12.2008)“О санитарно-эпидемиологическом благополучиинаселения” | |\n| МосСанПиН 2.1.4.002-99 | “Санитарные правила, нормы и гигиенические нормативы.Применение охранно-защитных дератизационных систем” | |\n| Методические указания№11-3/123-09 от 31.05.2000г. | “Методические указания по применениюОхранно-защитной дератизационной системы” | |\n| Приказ от 11.12.2020 №883н | “Правила по охране труда при строительстве,реконструкции и ремонте” | |\n| Приказ от 16.11.2020 №782н | “Правила по охране труда при работе на высоте” | |\n| ПУЭ | Правила устройства электроустановок | |\n| Прилагаемые документы | | |\n| 133/23-ГК-ОЗДС.СО | Спецификация оборудования, изделий и материалов | 1 лист |\n| 133/23-ГК-ОЗДС.Т1 | Техническое задание для смежных разделов | 1 лист |\n\n---\n\n[Block 7CH9-HHT6-NFH]\nBLOCK-7СНБНТБ-НФН\n##### Общая часть\nНастоящим разделом проекта предусматривается Охранно-защитная деразитационная система. Система выполнена на основе Охранно-защитной деразитационной системы «ДЕРСИС», предназначенной для защиты объекта:\n«Жилой комплекс, расположенный по адресу: г. Москва, Мосфильмовская ул., вл. 31А, размещенный на земельном участке, кадастровый № 77:07:001004-24 (адресный ориентир: г. Москва, Мосфильмовская ул., вл. 31А)\nНастоящая документация разработана на основании:\n- Технического задания на разработку проектной документации;\n- Исходных данных на проектирование, выданных заказчиком;\n- Действующих руководящих и нормативных документов;\n- Технической документации на применяемое оборудование.\nПроект не содержит впервые примененных или разработанных конструкций, материалов, изделий, оборудования, приборов и технических решений.\nРабочая документация выполнена в соответствии с нормативными документами Российской федерации:\n- СанПиН 3.3686-21, «Санитарно-эпидемиологические требования по профилактике инфекционных болезней»;\n- «Методические указания по применению Охранно-защитной деразитационной системы», утверждены Руководителем Департамента Госсанэпиднадзора Минздрава России 11-3/123-09 от 31.05.2000 г.;\n- РМ-2716, «Инструкция по проектированию, монтажу и приемке в эксплуатацию Охранно-защитных деразитационных систем (ОЗДС)», утверждена и введенная в действие указанием Комитета по архитектуре и градостроительству г. Москвы 20 от 16.05.2000 г.\n- МосСанПиН 2.14.002-99, «Санитарные правила, нормы и гигиенические нормативы. Применение охранно-защитных деразитационных систем»;\n- «Правил по охране труда при строительстве, реконструкции и ремонте» (Приказ от 11.12.2020 № 883н);\n- «Правил по охране труда при работе на высоте» (Приказ от 16.11.2020 № 782н);\n- ПНЭ-2002, 7-е издание, «Правила устройства электроустановок».\n##### 1. Общие указания\nОхранно-защитная деразитационная система «ДЕРСИС» предназначена для защиты объектов промышленного, коммерческого, админ\n\n---\n\n[Block 93TA-UFYV-639]\n2) ВУ – электронное устройство, усиливающее электрические импульсы, получаемые от ДР, до напряжения искрового разряда. Усиленные импульсы с ВУ через высоковольтный кабель (далее ВК) подаются на БЗ.\n\nКорпус ВУ сделан из металла и имеет защиту от пыли и брызг IP41.\n\nКорпус ВУ не имеет электрического контакта с электронной схемой, сами электронные компоненты внутри корпуса покрыты специальным компаундом, обеспечивающим высокую электрическую изоляцию.\n\nКорпус ВУ оборудован кронштейнами для крепления на горизонтальной или вертикальной поверхности.\n\nВсе кабели, подключенные к ВУ, вводятся внутрь корпуса через гермовводы, обеспечивающие в местах соединений герметичность и хорошую механическую фиксацию.\n\n3) ПВМТ – высоковольтный кабель с рабочим напряжением оболочки не менее 40 кВ.\n\nОдним концом ВК подсоединяется к ВУ, а другим к БЗ. По ВК от ВУ высоковольтные электрические импульсы передаются на БЗ.\n\n4) БЗ – двухкомпонентный электрический проводник, устанавливается на произвольной специально подготовленной поверхности и является воздействующим на грызунов элементом.\n\nОсновой БЗ является эластичный профиль из материала, имеющего хорошую электрическую изоляцию. Воздействующим элементом является токопроводящий проводник, установленный в верхней части профиля.\n\nПеред входом в защищаемое помещение разместить предупреждающие надписи.\n\n##### 2. Указания по монтажу\n\n- Подключить к ДР необходимое количество ВУ, не более 20 шт.\n\n- Подключить к каждому ВУ один БЗ.\n\n- Подключить ДР и ВУ через коммутационные коробки, чтобы не нарушать целостность блоков в результате монтажа.\n\n- Линии питания от ДР к ВУ проложить в лотках ЗОМ, по стеновым панелям в гофрированных трубах.\n\n- Оборудование монтировать на стене, выше уровня возможного затопления, но не более 1,8 м над полом или площадкой обслуживания.\n\n- Точное расположение оборудования и трассу прокладки кабеля уточнить при монтаже и отразить в исполнительной документации.\n\n- Расстановку барьерных элементов в защищаемых помещениях выполнить\n\n---\n\n[Block A3G3-4TDJ-7YH]\nПроект разработан в соответствии с экологическими, санитарно-гигиеническими, противопожарными и взрывобезопасными нормами, действующими на территории РФ, и обеспечивает безопасную для жизни и здоровья людей эксплуатацию объекта при соблюдении предусмотренных проектом мероприятий.\nГлавный инженер проекта [Signature] /Шмелькова Т.А./\n\n---\n\n[Block 4JLY-JUH9-VJX]\n| Этаж |\n|---|\n| Место установки ВУ |\n| Номер канала ДР |\n| БЗ |\n| Линия питания БЗвысоковольтным напряжением (20 кВ)ПВМТ-40 1х0,35 |\n| ВУ |\n| Линия питания ВУ низковольтнымимпульсным напряжениемППГн2(А)-HF 2х1,5 мм2 |\n| Подключение к ДР220 В50 Гцот ВРУППГн2(А)-HF 3х1,5 мм2 |\n| Место установки ДР |\n\n---\n\n[Block 4497-74VA-LGE]\n7| № пом. | Наименование | Площадь, м2 | Кам.пом | Примечание |\n|---|---|---|---|---|\n| Автостоянка | | | | |\n| 1 | Автостоянка | 3008,5 | В1 | |\n| | | 3008,5 | | |\n| МОП - места общего пользования | | | | |\n| 2 | Лестничная клетка | 16,0 | | |\n| 3 | Лифтовый холл / Тамбур-шлюз (ПБЗ) | 31,9 | | |\n| 4 | Лестничная клетка | 8,9 | | |\n| | | 56,8 | | |\n| Технические помещения | | | | |\n| 6 | РУВН | 20,8 | ВЗ | |\n| 7 | ИТП | 70,8 | Д | |\n| 8 | Насосная | 107,2 | Д | |\n| 9 | Венткамера ДУ автостоянки | 4,9 | ВЗ | |\n| 10 | Венткамера ПД | 6,3 | ВЗ | |\n| 11 | Помещение ТБО | 15,7 | В1 | |\n| 12.1 | Электрощитовая автостоянки | 15,6 | ВЗ | |\n| 12.2 | Электрощитовая ИТП | 11,0 | ВЗ | |\n| 13 | ТП1 | 7,2 | ВЗ | |\n| 14 | ТП2 | 7,2 | ВЗ | |\n| 15 | ПУИ | 4,6 | ВЗ | |\n| | | 271,3 | | |\n| Кладовая отдельно стоящая | | | | |\n| К.32 | Кладовая | 4,5 | ВЗ | Нпом=4,7м |\n| К.33 | Кладовая | 5,0 | ВЗ | Нпом=4,7м |\n| К.35 | Кладовая | 9,1 | ВЗ | Нпом=3,0м |\n| К.36 | Кладовая | 10,0 | ВЗ | Нпом=3,0м |\n| К.37 | Кладовая | 10,0 | ВЗ | Нпом=3,0м |\n| К.38 | Кладовая | 4,2 | ВЗ | Нпом min=2,59м |\n| К.39 | Кладовая | 5,3 | ВЗ | Нпом=2,88м |\n| | | 48,1 | | |\n| Итого на этаже | | 3384,7 | | |\n\n---\n\n[Block 9YW7-97MQ-PLT]\nПримечания:\n\n- Линии питания от ДР к ВУ прокладываются в лотках ЗОМ, по стеновым панелям в гофрированной трубе.\n\n- Оборудование монтировать на стене, выше уровня возможного затопления, но не на полом или площадкой обслуживания.\n\n- Не допускается установка СИСТЕМЫ в помещениях, где складируются лакокраски, бензин, ацетон, спирт, растворители и прочие химически активные и взрывоопасные вещества.\n\nВ ПРОИЗВОДСТВО РАБОТ\n\nООО \"СР.Девелопмент\"\n\nТИП\n\nТелефон: 8 (862) 25-25-25\n\n---\n\n[Block QM4L-V9YU-NQC]\n8\n\n| Экспликация помещений -1-го этажа на опт. -3,750 | | | | |\n|---|---|---|---|---|\n| № пом. | Наименование | Площадь, м2 | Кат. помещение | Примечание |\n| Кладовая отдельно стоящая | | | | |\n| K.1 | Кладовая | 5,1 | B1 | Hпом=3,4м |\n| K.2 | Кладовая | 4,4 | B1 | Hпом=2,65м |\n| K.3 | Кладовая | 2,7 | B1 | Hпом=3,4/2,65м |\n| K.4 | Кладовая | 3,8 | B1 | Hпом=3,4м |\n| K.5 | Кладовая | 4,7 | B1 | Hпом=3,4м |\n| K.6 | Кладовая | 6,8 | B1 | Hпом=3,4м |\n| K.7 | Кладовая | 5,0 | B1 | Hпом=3,4м |\n| K.8 | Кладовая | 4,1 | B1 | Hпом=3,4м |\n| K.9 | Кладовая | 5,6 | B1 | Hпом=3,4м |\n| K.10 | Кладовая | 3,8 | B1 | Hпом=2,65м |\n| K.11 | Кладовая | 3,8 | B1 | Hпом=3,4м |\n| K.12 | Кладовая | 4,0 | B1 | Hпом=3,4м |\n| K.13 | Кладовая | 4,3 | B1 | Hпом=2,65м |\n| K.14 | Кладовая | 4,2 | B1 | Hпом=3,4м |\n| K.15 | Кладовая | 4,1 | B1 | Hпом=3,4м |\n| K.16 | Кладовая | 4,0 | B1 | Hпом=2,65м |\n| K.17 | Кладовая | 4,0 | B1 | Hпом=3,4м |\n| K.18 | Кладовая | 4,0 | B1 | Hпом=2,5м |\n| K.19 | Кладовая | 4,0 | B1 | Hпом=3,4м |\n| K.20 | Кладовая | 4,0 | B1 | Hпом=3,4м |\n| K.21 | Кладовая | 4,0 | B1 | Hпом=2,5м |\n| K.22 | Кладовая | 3,2 | B1 | Hпом=3,4м |\n| K.23 | Кладовая | 3,2 | B1 | Hпом=3,4м |\n| K.24 | Кладовая | 3,4 | B1 | Hпом=3,4м |\n| K.25 | Кладовая | 3,4 | B1 | Hпом=3,4м |\n| K.26 | Кладовая | 3,4 | B1 | Hпом=3,4м |\n| K.27 | Кладовая | 5,9 | B1 | Hпом=3,4м |\n| K.28 | Кладовая | 2,9 | B1 | Hпом=3,4м |\n| K.29 | Кладовая | 5,1 | B1 | Hпом=2,65м |\n| K.30 | Кладовая | 2,8 | B1 | Hпом=3,4м |\n| K.31 | Кладовая | 4,4 | B1 | Hпом=3,4/2,65м |\n| K.34 | Кладовая | 5,4 | B1 | Hпом=3,4м |\n| 133,5 | | | | |\n| МОП - места общего пользования | | | | |\n| 1.1 | Коридор | 57,4 | | Hпом=2,4м |\n| 1.2 | Коридор | 68,8 | | Hпом=2,4м |\n| 2 | Лифтпойб холл / Тамбур-шлюз (ПБ3) | 21,2 | | Hпом=2,5м |\n| 3 | Лестничная клетка | 23,1 | | Hпом=3,4м |\n| 170,5 | | | | |\n| Технические помещения | | | | |\n| 4 | Помещение прокладки коммуникаций | 19,5 | B3 | Hпом=3,4м |\n| 5 | Операционная | 5,9 | B4 | Hпом=3,4м |\n| 6 | Кроссова\n\n---\n\n[Block 4LWU-4RYR-RN9]\nПримечания:\n- Линии питания от ДР к ВУ прокладываются в лотках ЭОМ, по стеновым панелям в гофрированной трубе.\n- Оборудование монтировать на стене, выше уровня возможного затопления, но не на полом или площадкой обслуживания.\n- Не допускается установка СИСТЕМЫ в помещениях, где складируются лакокраски, бензин, ацетон, спирт, растворители и прочие химически активные и взрывоопасные вещества.\nВ ПРОИЗВОДСТВО РАБОТ\nООО СУ.Девелопмент\nГИП\nГород Челябинск 2025\n\n---\n\n[Block 44WK-XPV7-39L]\nПримечание:\n* – размеры для справок\n1. Оборудование монтировать на стене, выше уровня возможного затопления не более 1,8 м над полом или площадкой обслуживания.\nВ ПРОИЗВОДСТВО РАБОТ\nОТДЕЛ СТРОИТЕЛЬСТВА\nГИП\nЕгоров А.С. 17.06.2025\n\n---\n\n[Block 6XGM-3A6W-7GQ]\nПримечание:\n- * – размеры для справок\n1. Оборудование монтировать на стене, выше уровня возможного запаса, но не более 1,8 м над полом или площадкой обслуживания.\nВ ПРОИЗВОДСТВО УДОПУСТИЛ\nООО \"СР.Девелопмент\"\nГИП\nЕгоров А.С. 17.06.2025\n\n---\n\n[Block 99CC-U9EW-X7M]\nBLOCK-990CC-U9EW-X7M\n| Номер кабеля | Номер линии | Трасса | | | Кабель | | | |\n|---|---|---|---|---|---|---|---|---|\n| | | Этаж | Начало | Этаж | Конец | Марка | Количество кабелей, сечение | Общая длина, м |\n| ДР-1 | | | | | | | | |\n| 1 | | -2-й этажотм.-7.650 | ЭЩ ИТП (пом. 12.2) | -2-й этажотм.-7.650 | ЭЩ пом. 12.2 (розетка блока ДР-1) | ППГнг(А)-НФ | 3x1,5 мм2 | 10 |\n| 2 | Гр.1 | -2-й этажотм.-7.650 | ДР-1 (пом. 12.2) | -2-й этажотм.-7.650 | ВУ 1-1-1 - ВУ 1-1-4пом. 12.2, 12.1, 7 | ППГнг(А)-НФ | 2x1,5 мм2 | 74 |\n| 3 | Гр.2 | -2-й этажотм.-7.650 | ДР-1 (пом. 12.2) | -2-й этажотм.-7.650 | ВУ 1-2-5 - ВУ 1-2-7пом. 8 | ППГнг(А)-НФ | 2x1,5 мм2 | 93 |\n| 4 | Гр.3 | -2-й этажотм.-7.650 | ДР-1 (пом. 12.2) | -2-й этажотм.-7.650 | ВУ 1-3-8 - ВУ 1-3-10пом. 9, 11, 10 | ППГнг(А)-НФ | 2x1,5 мм2 | 116 |\n| ДР-2 | | | | | | | | |\n| 5 | | -1-й этажотм.-3.750 | ВРУ Жл (пом. 8) | -1-й этажотм.-6.450 | ВРУ Жл пом. 8 (розетка блока ДР-2) | ППГнг(А)-НФ | 3x1,5 мм2 | 10 |\n| 6 | Гр.1 | -1-й этажотм.-3.750 | ДР-2 (пом. 8) | -1-й этажотм.-3.750 | ВУ 2-1-1 - ВУ 2-1-4пом. 8, 11, 7 | ППГнг(А)-НФ | 2x1,5 мм2 | 79 |\n| 7 | Гр.2 | -1-й этажотм.-3.750 | ДР-2 (пом. 8) | -1-й этажотм.-3.750 | ВУ 2-2-5 - ВУ 2-2-6пом. 4, 16 | ППГнг(А)-НФ | 2x1,5 мм2 | 107 |\n| 8 | Гр.3 | -1-й этажотм.-3.750 | ДР-2 (пом. 8) | -1-й этажотм.-3.750 | ВУ 2-3-7 - ВУ 2-3-9пом. 13, 9, 10 | ППГнг(А)-НФ | 2x1,5 мм2 | 82 |\n| 9 | Гр.4 | -1-й этажотм.-3.750 | ДР-2 (пом. 8) | -1-й этажотм.-3.750 | ВУ 2-4-10 - ВУ 2-4-11пом. 15, 12 | ППГнг(А)-НФ | 2x1,5 мм2 | 104 |\n\n---\n\n[Block YDK7-G93T-9TL]\nВЛОК:УДК7-093Т-9ТЛ| Поз. | Наименование и техническая характеристика | Тип, марка, обозначение документа, опросного листа | Код продукции | Поставщик | Ед. измерения | Количество | Масса 1 ед. кг | Примечание |\n|---|---|---|---|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |\n| Электрический дегазатор \"ДЕРСИС\" в составе: | | | | | | | | |\n| 1 | Дегазатор (ДР) | ТУ 7031-002-33227782-2014Сертификат РОСС RU.HB34.H01939 | | 000 \"АМТЦ\" | шт | 2 | | |\n| 2 | Высоковольтный усилитель (ВУ) | ТУ 7031-002-33227782-2014Сертификат РОСС RU.HB34.H01939 | | 000 \"АМТЦ\" | шт | 21 | | |\n| 3 | Барьер электрический (БЗ) | ТУ 7031-002-33227782-2014Сертификат РОСС RU.HB34.H01939 | | 000 \"АМТЦ\" | м | 42 | | |\n| Кабели и кабеленесущие изделия | | | | | | | | |\n| 4 | Кабель силовой с медными жилами с пониженным дымо- и газовыделением | ППГн2(А)-НФ 3х1,5 мм2 | | 000 \"Конкорд\" | м | 20 | | возможна замена на аналог |\n| 5 | Кабель силовой с медными жилами с пониженным дымо- и газовыделением | ППГн2(А)-НФ 2х1,5 мм2 | | 000 \"Конкорд\" | м | 655 | | возможна замена на аналог |\n| 6 | Кабель высоковольтный сечением 0,35 мм | ПВМТ-40 | | ОАО \"Беларуськабель\" | м | 42 | | |\n| 7 | Труба гофрированная из ПВХ, ф20мм | 91920 | | АО \"ДКС\" | м | 467 | | возможна замена на аналог |\n| Электроустановочные и коммутационные изделия | | | | | | | | |\n| 8 | Коробка ответвительная | КРП | | 000 \"Нептун\" | шт | 42 | | возможна замена на аналог |\n| 9 | Колодка клеммная | ЗВИ-5 | | \"ИЕК\" | шт | 21 | | возможна замена на аналог |\n| 10 | Штепсельная розетка с заземляющим контактом | Серия Quieo | | Legrand SNC | шт | 2 | | возможна замена на аналог |\n| Прочие затраты | | | | | | | | |\n| 11 | Монтажный клей Tytan Classic Fix Professional 310 мл | | | TITAN / TYTAN | шт | 9 | | возможна замена на аналог |\n| 12 | Плакат по технике безопасности (система ОЗДС) | | | | шт | 21 | | |\n\n---\n\n[Block 9ACR-NUTX-HQ3]\n| ЭЩ ИТП на -2-м этаже на опм. -7,650,№ пом. 12.2 | В помещении ЭЩ на -2-м этаже на опм. -7,650 предусмотреть установку одного автоматического выключателя (номинал 10А) в распределительный шкаф.Электроснабжение ОЗДС допускается осуществлять по III категории надежности, в соответствии с ПУЭ. Количество Дератизаторов: 1 шт. Напряжение сети: 220 ВОбщая потребляемая мощность: 20 Вт |\n|---|---|\n| ВРУ Жл на -1-м этаже на опм. -3,750,№ пом. 8 | В помещении ЭЩ на -1-м этаже на опм. -3,750 предусмотреть установку одного автоматического выключателя (номинал 10А) в распределительный шкаф.Электроснабжение ОЗДС допускается осуществлять по III категории надежности, в соответствии с ПУЭ. Количество Дератизаторов: 1 шт. Напряжение сети: 220 ВОбщая потребляемая мощность: 20 Вт |",
+      "rawResponse": "{\n  \"glossary\": [\n    {\n      \"code\": \"ДР-1\",\n      \"item_type\": \"assembly\",\n      \"description\": \"Дератизатор (блок управления системы ОЗДС)\"\n    },\n    {\n      \"code\": \"ДР-2\",\n      \"item_type\": \"assembly\",\n      \"description\": \"Дератизатор (блок управления системы ОЗДС)\"\n    },\n    {\n      \"code\": \"ВУ\",\n      \"item_type\": \"assembly\",\n      \"description\": \"Высоковольтный усилитель\"\n    },\n    {\n      \"code\": \"БЗ\",\n      \"item_type\": \"assembly\",\n      \"description\": \"Барьер электрический (воздействующий элемент)\"\n    },\n    {\n      \"code\": \"ПВМТ-40\",\n      \"item_type\": \"material\",\n      \"description\": \"Кабель высоковольтный\"\n    },\n    {\n      \"code\": \"ППГнг(А)-HF\",\n      \"item_type\": \"material\",\n      \"description\": \"Кабель силовой безгалогенный\"\n    },\n    {\n      \"code\": \"КРП\",\n      \"item_type\": \"assembly\",\n      \"description\": \"Коробка ответвительная\"\n    },\n    {\n      \"code\": \"ЗВИ-5\",\n      \"item_type\": \"assembly\",\n      \"description\": \"Колодка клеммная\"\n    },\n    {\n      \"code\": \"В1\",\n      \"item_type\": \"construction\",\n      \"description\": \"Категория помещения по пожарной и взрывопожарной опасности\"\n    },\n    {\n      \"code\": \"ВЗ\",\n      \"item_type\": \"construction\",\n      \"description\": \"Категория помещения по пожарной и взрывопожарной опасности\"\n    },\n    {\n      \"code\": \"Д\",\n      \"item_type\": \"construction\",\n      \"description\": \"Категория помещения по пожарной и взрывопожарной опасности\"\n    },\n    {\n      \"code\": \"К.32\",\n      \"item_type\": \"location\",\n      \"description\": \"Кладовая\"\n    },\n    {\n      \"code\": \"К.1\",\n      \"item_type\": \"location\",\n      \"description\": \"Кладовая\"\n    }\n  ]\n}",
+      "parsedItemsCount": 13,
+      "validItemsCount": 13,
+      "droppedItems": [],
+      "responseKeys": [
+        "glossary"
+      ],
+      "usage": {
+        "prompt_tokens": 8535,
+        "completion_tokens": 570,
+        "total_tokens": 9105,
+        "cost": 0.0059775,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0059775,
+          "upstream_inference_prompt_cost": 0.0042675,
+          "upstream_inference_completions_cost": 0.00171
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "hasImage": false,
+      "durationMs": 4288,
+      "timestamp": "2026-03-03T14:39:02.201Z"
+    },
+    {
+      "timestamp": "2026-03-03T14:39:07.589Z",
+      "blockUid": "93TA-UFYV-639",
+      "blockType": "TEXT",
+      "phase": "Фаза 2",
+      "systemPrompt": "You are a construction BOM (Bill of Materials) extractor for Russian architectural documentation.\r\nYour task is to extract materials, components, and quantities from the provided content.\r\n\r\nANALYSE THE CONTENT STRUCTURE FIRST:\r\nDetermine what type of content you are looking at:\r\nA) \"Ведомость материалов\" / \"Сводная ведомость материалов\" — a material inventory list with quantities\r\nB) \"Спецификация элементов\" — a specification of assembly components (e.g., each railing ОГ-13 has sub-components)\r\nC) \"Ведомость изделий\" — an inventory of finished assemblies/products (e.g., list of railings ОГ-13, ОГ-14 with lengths)\r\nD) Other table with materials/quantities\r\n\r\nRULES:\r\n1. Extract ONLY materials/elements explicitly mentioned in the content.\r\n2. DO NOT invent or hallucinate materials not present in the source.\r\n3. Fix common OCR errors: \"спилобата\"→\"стилобата\", \"Tun\"→\"Тип\", \"опм.\"→\"отм.\"\r\n4. For canonical_name: normalize the material name (fix typos, standardize, remove \"или аналог\").\r\n5. For canonical_key: create a lowercase Latin slug (transliterate Russian, replace spaces with underscores).\r\n6. Parse Russian numeric format: \"202,6\" means 202.6; \"1 692,9\" means 1692.9.\r\n7. Unit should be standardized: м2, м3, шт, м.п., кг, т, л, компл.\r\n8. \"мм\" is a THICKNESS, not a quantity unit — put thickness in description field.\r\n9. DO NOT extract normative documents (ГОСТ, СП, СНиП, ФЗ, Постановление) as materials.\r\n10. DO NOT extract section headers or generic category names.\r\n11. DO NOT extract cross-references (see раздел, см. лист, см. 133/23...).\r\n\r\nFOR TYPE C (Ведомость изделий — assemblies like ОГ-13, ОГ-14 with counts/lengths):\r\n- Return {\"items\": []} — assemblies are NOT individual materials.\r\n\r\nFOR TYPE B (Спецификация элементов — components grouped under an assembly):\r\n- \"construction\" field = the assembly name/mark (e.g., \"ОГ-13\", \"ОГ-14\", \"Витраж В-1\")\r\n- \"raw_name\" = the component material (e.g., \"Стальная труба 30x15x2 мм\")\r\n- Group headers like \"ОГ-13, L=4 700\" are assembly identifiers, NOT materials\r\n\r\nFOR TYPES A and D:\r\n- \"construction\" field = the structural element or location this material belongs to (e.g., \"Отделка стены\", \"Ступень дорожная\", \"Фпод.п-1\"), or null if no clear parent element\r\n- Extract each material row as a separate item\r\n\r\nEach item in the \"items\" array must have this structure:\r\n{\r\n  \"raw_name\": \"exact name from document\",\r\n  \"canonical_name\": \"normalized Russian name\",\r\n  \"canonical_key\": \"latin_slug_key\",\r\n  \"construction\": \"parent assembly or structural element name, or null\",\r\n  \"extra_params\": \"color RAL, additional specs, or null\",\r\n  \"quantity\": 123.4 or null,\r\n  \"unit\": \"м2\" or null,\r\n  \"mark\": \"position/mark identifier\" or null,\r\n  \"gost\": \"ГОСТ reference\" or null,\r\n  \"description\": \"thickness or additional description\" or null,\r\n  \"note\": \"remarks from примечание column\" or null,\r\n  \"source_snippet\": \"exact quote from source proving this item exists\",\r\n  \"confidence\": 0.9\r\n}\n\nDOCUMENT GLOSSARY (assemblies identified in this document — do NOT extract as materials):\n- ДР-1: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ДР-2: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ВУ: assembly — \"Высоковольтный усилитель\" → NOT a material, NOT a component\n- БЗ: assembly — \"Барьер электрический (воздействующий элемент)\" → NOT a material, NOT a component\n- КРП: assembly — \"Коробка ответвительная\" → NOT a material, NOT a component\n- ЗВИ-5: assembly — \"Колодка клеммная\" → NOT a material, NOT a component",
+      "userPrompt": "Page: 5\nBlock ID: 93TA-UFYV-639\nSection: 2. Указания по монтажу\n\nContent:\n2) ВУ – электронное устройство, усиливающее электрические импульсы, получаемые от ДР, до напряжения искрового разряда. Усиленные импульсы с ВУ через высоковольтный кабель (далее ВК) подаются на БЗ.\n\nКорпус ВУ сделан из металла и имеет защиту от пыли и брызг IP41.\n\nКорпус ВУ не имеет электрического контакта с электронной схемой, сами электронные компоненты внутри корпуса покрыты специальным компаундом, обеспечивающим высокую электрическую изоляцию.\n\nКорпус ВУ оборудован кронштейнами для крепления на горизонтальной или вертикальной поверхности.\n\nВсе кабели, подключенные к ВУ, вводятся внутрь корпуса через гермовводы, обеспечивающие в местах соединений герметичность и хорошую механическую фиксацию.\n\n3) ПВМТ – высоковольтный кабель с рабочим напряжением оболочки не менее 40 кВ.\n\nОдним концом ВК подсоединяется к ВУ, а другим к БЗ. По ВК от ВУ высоковольтные электрические импульсы передаются на БЗ.\n\n4) БЗ – двухкомпонентный электрический проводник, устанавливается на произвольной специально подготовленной поверхности и является воздействующим на грызунов элементом.\n\nОсновой БЗ является эластичный профиль из материала, имеющего хорошую электрическую изоляцию. Воздействующим элементом является токопроводящий проводник, установленный в верхней части профиля.\n\nПеред входом в защищаемое помещение разместить предупреждающие надписи.\n\n##### 2. Указания по монтажу\n\n- Подключить к ДР необходимое количество ВУ, не более 20 шт.\n\n- Подключить к каждому ВУ один БЗ.\n\n- Подключить ДР и ВУ через коммутационные коробки, чтобы не нарушать целостность бл��ков в результате монтажа.\n\n- Линии питания от ДР к ВУ проложить в лотках ЗОМ, по стеновым панелям в гофрированных трубах.\n\n- Оборудование монтировать на стене, выше уровня возможного затопления, но не более 1,8 м над полом или площадкой обслуживания.\n\n- Точное расположение оборудования и трассу прокладки кабеля уточнить при монтаже и отразить в исполнительной документации.\n\n- Расстановку барьерных элементов в защищаемых помещениях выполнить согласно прилагаемым типовым решениям.\n\n- Прокладку линий питания БЗ осуществить на расстоянии не менее 0,05 м от заземленных металлоконструкций.\n\n##### 3. Требования по безопасности\n\n- Перед проведением регламентных работ в защищаемых помещениях необходимо отключить оборудование от электросети.\n\n- Запрещается вскрывать, разбирать блоки системы, а также вносить в конструкцию системы какие-либо изменения.\n\n- Запрещается эксплуатировать систему с механическими повреждениями корпусов блоков, сегмента шнура, соединительных кабелей и барьера.\n\n- Не допускается попадание влаги внутрь корпусов блоков, контакта с химически активными и взрывоопасными веществами.\n\n- Не допускается установка оборудования в помещениях, в которых складируются лакокрасочные изделия, бензин, ацетон, спирт, растворители и прочие химически активные и взрывоопасные вещества.",
+      "rawResponse": "",
+      "parsedItemsCount": 0,
+      "validItemsCount": 0,
+      "droppedItems": [],
+      "responseKeys": [],
+      "usage": null,
+      "hasImage": false,
+      "durationMs": 0,
+      "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]"
+    },
+    {
+      "timestamp": "2026-03-03T14:39:13.101Z",
+      "blockUid": "4JLY-JUH9-VJX",
+      "blockType": "TEXT",
+      "phase": "Фаза 2",
+      "systemPrompt": "You are a construction BOM (Bill of Materials) extractor for Russian architectural documentation.\r\nYour task is to extract materials, components, and quantities from the provided content.\r\n\r\nANALYSE THE CONTENT STRUCTURE FIRST:\r\nDetermine what type of content you are looking at:\r\nA) \"Ведомость материалов\" / \"Сводная ведомость материалов\" — a material inventory list with quantities\r\nB) \"Спецификация элементов\" — a specification of assembly components (e.g., each railing ОГ-13 has sub-components)\r\nC) \"Ведомость изделий\" — an inventory of finished assemblies/products (e.g., list of railings ОГ-13, ОГ-14 with lengths)\r\nD) Other table with materials/quantities\r\n\r\nRULES:\r\n1. Extract ONLY materials/elements explicitly mentioned in the content.\r\n2. DO NOT invent or hallucinate materials not present in the source.\r\n3. Fix common OCR errors: \"спилобата\"→\"стилобата\", \"Tun\"→\"Тип\", \"опм.\"→\"отм.\"\r\n4. For canonical_name: normalize the material name (fix typos, standardize, remove \"или аналог\").\r\n5. For canonical_key: create a lowercase Latin slug (transliterate Russian, replace spaces with underscores).\r\n6. Parse Russian numeric format: \"202,6\" means 202.6; \"1 692,9\" means 1692.9.\r\n7. Unit should be standardized: м2, м3, шт, м.п., кг, т, л, компл.\r\n8. \"мм\" is a THICKNESS, not a quantity unit — put thickness in description field.\r\n9. DO NOT extract normative documents (ГОСТ, СП, СНиП, ФЗ, Постановление) as materials.\r\n10. DO NOT extract section headers or generic category names.\r\n11. DO NOT extract cross-references (see раздел, см. лист, см. 133/23...).\r\n\r\nFOR TYPE C (Ведомость изделий — assemblies like ОГ-13, ОГ-14 with counts/lengths):\r\n- Return {\"items\": []} — assemblies are NOT individual materials.\r\n\r\nFOR TYPE B (Спецификация элементов — components grouped under an assembly):\r\n- \"construction\" field = the assembly name/mark (e.g., \"ОГ-13\", \"ОГ-14\", \"Витраж В-1\")\r\n- \"raw_name\" = the component material (e.g., \"Стальная труба 30x15x2 мм\")\r\n- Group headers like \"ОГ-13, L=4 700\" are assembly identifiers, NOT materials\r\n\r\nFOR TYPES A and D:\r\n- \"construction\" field = the structural element or location this material belongs to (e.g., \"Отделка стены\", \"Ступень дорожная\", \"Фпод.п-1\"), or null if no clear parent element\r\n- Extract each material row as a separate item\r\n\r\nEach item in the \"items\" array must have this structure:\r\n{\r\n  \"raw_name\": \"exact name from document\",\r\n  \"canonical_name\": \"normalized Russian name\",\r\n  \"canonical_key\": \"latin_slug_key\",\r\n  \"construction\": \"parent assembly or structural element name, or null\",\r\n  \"extra_params\": \"color RAL, additional specs, or null\",\r\n  \"quantity\": 123.4 or null,\r\n  \"unit\": \"м2\" or null,\r\n  \"mark\": \"position/mark identifier\" or null,\r\n  \"gost\": \"ГОСТ reference\" or null,\r\n  \"description\": \"thickness or additional description\" or null,\r\n  \"note\": \"remarks from примечание column\" or null,\r\n  \"source_snippet\": \"exact quote from source proving this item exists\",\r\n  \"confidence\": 0.9\r\n}\n\nDOCUMENT GLOSSARY (assemblies identified in this document — do NOT extract as materials):\n- ДР-1: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ДР-2: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ВУ: assembly — \"Высоковольтный усилитель\" → NOT a material, NOT a component\n- БЗ: assembly — \"Барьер электрический (воздействующий элемент)\" → NOT a material, NOT a component\n- КРП: assembly — \"Коробка ответвительная\" → NOT a material, NOT a component\n- ЗВИ-5: assembly — \"Колодка клеммная\" → NOT a material, NOT a component",
+      "userPrompt": "Page: 7\nBlock ID: 4JLY-JUH9-VJX\n\nContent:\n| Этаж |\n|---|\n| Место установки ВУ |\n| Номер канала ДР |\n| БЗ |\n| Линия питания БЗвысоковольтным напряжением (20 кВ)ПВМТ-40 1х0,35 |\n| ВУ |\n| Линия питания ВУ низковольтнымимпульсным напряжениемППГн2(А)-HF 2х1,5 мм2 |\n| Подключение к ДР220 В50 Гцот ВРУППГн2(А)-HF 3х1,5 мм2 |\n| Место установки ДР |",
+      "rawResponse": "",
+      "parsedItemsCount": 0,
+      "validItemsCount": 0,
+      "droppedItems": [],
+      "responseKeys": [],
+      "usage": null,
+      "hasImage": false,
+      "durationMs": 0,
+      "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]"
+    },
+    {
+      "timestamp": "2026-03-03T14:39:14.755Z",
+      "blockUid": "4497-74VA-LGE",
+      "blockType": "TEXT",
+      "phase": "Фаза 2",
+      "systemPrompt": "You are a construction BOM (Bill of Materials) extractor for Russian architectural documentation.\r\nYour task is to extract materials, components, and quantities from the provided content.\r\n\r\nANALYSE THE CONTENT STRUCTURE FIRST:\r\nDetermine what type of content you are looking at:\r\nA) \"Ведомость материалов\" / \"Сводная ведомость материалов\" — a material inventory list with quantities\r\nB) \"Спецификация элементов\" — a specification of assembly components (e.g., each railing ОГ-13 has sub-components)\r\nC) \"Ведомость изделий\" — an inventory of finished assemblies/products (e.g., list of railings ОГ-13, ОГ-14 with lengths)\r\nD) Other table with materials/quantities\r\n\r\nRULES:\r\n1. Extract ONLY materials/elements explicitly mentioned in the content.\r\n2. DO NOT invent or hallucinate materials not present in the source.\r\n3. Fix common OCR errors: \"спилобата\"→\"стилобата\", \"Tun\"→\"Тип\", \"опм.\"→\"отм.\"\r\n4. For canonical_name: normalize the material name (fix typos, standardize, remove \"или аналог\").\r\n5. For canonical_key: create a lowercase Latin slug (transliterate Russian, replace spaces with underscores).\r\n6. Parse Russian numeric format: \"202,6\" means 202.6; \"1 692,9\" means 1692.9.\r\n7. Unit should be standardized: м2, м3, шт, м.п., кг, т, л, компл.\r\n8. \"мм\" is a THICKNESS, not a quantity unit — put thickness in description field.\r\n9. DO NOT extract normative documents (ГОСТ, СП, СНиП, ФЗ, Постановление) as materials.\r\n10. DO NOT extract section headers or generic category names.\r\n11. DO NOT extract cross-references (see раздел, см. лист, см. 133/23...).\r\n\r\nFOR TYPE C (Ведомость изделий — assemblies like ОГ-13, ОГ-14 with counts/lengths):\r\n- Return {\"items\": []} — assemblies are NOT individual materials.\r\n\r\nFOR TYPE B (Спецификация элементов — components grouped under an assembly):\r\n- \"construction\" field = the assembly name/mark (e.g., \"ОГ-13\", \"ОГ-14\", \"Витраж В-1\")\r\n- \"raw_name\" = the component material (e.g., \"Стальная труба 30x15x2 мм\")\r\n- Group headers like \"ОГ-13, L=4 700\" are assembly identifiers, NOT materials\r\n\r\nFOR TYPES A and D:\r\n- \"construction\" field = the structural element or location this material belongs to (e.g., \"Отделка стены\", \"Ступень дорожная\", \"Фпод.п-1\"), or null if no clear parent element\r\n- Extract each material row as a separate item\r\n\r\nEach item in the \"items\" array must have this structure:\r\n{\r\n  \"raw_name\": \"exact name from document\",\r\n  \"canonical_name\": \"normalized Russian name\",\r\n  \"canonical_key\": \"latin_slug_key\",\r\n  \"construction\": \"parent assembly or structural element name, or null\",\r\n  \"extra_params\": \"color RAL, additional specs, or null\",\r\n  \"quantity\": 123.4 or null,\r\n  \"unit\": \"м2\" or null,\r\n  \"mark\": \"position/mark identifier\" or null,\r\n  \"gost\": \"ГОСТ reference\" or null,\r\n  \"description\": \"thickness or additional description\" or null,\r\n  \"note\": \"remarks from примечание column\" or null,\r\n  \"source_snippet\": \"exact quote from source proving this item exists\",\r\n  \"confidence\": 0.9\r\n}\n\nDOCUMENT GLOSSARY (assemblies identified in this document — do NOT extract as materials):\n- ДР-1: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ДР-2: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ВУ: assembly — \"Высоковольтный усилитель\" → NOT a material, NOT a component\n- БЗ: assembly — \"Барьер электрический (воздействующий элемент)\" → NOT a material, NOT a component\n- КРП: assembly — \"Коробка ответвительная\" → NOT a material, NOT a component\n- ЗВИ-5: assembly — \"Колодка клеммная\" → NOT a material, NOT a component",
+      "userPrompt": "Page: 8\nBlock ID: 4497-74VA-LGE\n\nContent:\n7| № пом. | Наименование | Площадь, м2 | Кам.пом | Примечание |\n|---|---|---|---|---|\n| Автостоянка | | | | |\n| 1 | Автостоянка | 3008,5 | В1 | |\n| | | 3008,5 | | |\n| МОП - места общего пользования | | | | |\n| 2 | Лестничная клетка | 16,0 | | |\n| 3 | Лифтовый холл / Тамбур-шлюз (ПБЗ) | 31,9 | | |\n| 4 | Лестничная клетка | 8,9 | | |\n| | | 56,8 | | |\n| Технические помещения | | | | |\n| 6 | РУВН | 20,8 | ВЗ | |\n| 7 | ИТП | 70,8 | Д | |\n| 8 | Насосная | 107,2 | Д | |\n| 9 | Венткамера ДУ автостоянки | 4,9 | ВЗ | |\n| 10 | Венткамера ПД | 6,3 | ВЗ | |\n| 11 | Помещение ТБО | 15,7 | В1 | |\n| 12.1 | Электрощитовая автостоянки | 15,6 | ВЗ | |\n| 12.2 | Электрощитовая ИТП | 11,0 | ВЗ | |\n| 13 | ТП1 | 7,2 | ВЗ | |\n| 14 | ТП2 | 7,2 | ВЗ | |\n| 15 | ПУИ | 4,6 | ВЗ | |\n| | | 271,3 | | |\n| Кладовая отдельно стоящая | | | | |\n| К.32 | Кладовая | 4,5 | ВЗ | Нпом=4,7м |\n| К.33 | Кладовая | 5,0 | ВЗ | Нпом=4,7м |\n| К.35 | Кладовая | 9,1 | ВЗ | Нпом=3,0м |\n| К.36 | Кладовая | 10,0 | ВЗ | Нпом=3,0м |\n| К.37 | Кладовая | 10,0 | ВЗ | Нпом=3,0м |\n| К.38 | Кладовая | 4,2 | ВЗ | Нпом min=2,59м |\n| К.39 | Кладовая | 5,3 | ВЗ | Нпом=2,88м |\n| | | 48,1 | | |\n| Итого на этаже | | 3384,7 | | |",
+      "rawResponse": "",
+      "parsedItemsCount": 0,
+      "validItemsCount": 0,
+      "droppedItems": [],
+      "responseKeys": [],
+      "usage": null,
+      "hasImage": false,
+      "durationMs": 0,
+      "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]"
+    },
+    {
+      "timestamp": "2026-03-03T14:39:29.285Z",
+      "blockUid": "99CC-U9EW-X7M",
+      "blockType": "TEXT",
+      "phase": "Фаза 2",
+      "systemPrompt": "You are a construction BOM (Bill of Materials) extractor for Russian architectural documentation.\r\nYour task is to extract materials, components, and quantities from the provided content.\r\n\r\nANALYSE THE CONTENT STRUCTURE FIRST:\r\nDetermine what type of content you are looking at:\r\nA) \"Ведомость материалов\" / \"Сводная ведомость материалов\" — a material inventory list with quantities\r\nB) \"Спецификация элементов\" — a specification of assembly components (e.g., each railing ОГ-13 has sub-components)\r\nC) \"Ведомость изделий\" — an inventory of finished assemblies/products (e.g., list of railings ОГ-13, ОГ-14 with lengths)\r\nD) Other table with materials/quantities\r\n\r\nRULES:\r\n1. Extract ONLY materials/elements explicitly mentioned in the content.\r\n2. DO NOT invent or hallucinate materials not present in the source.\r\n3. Fix common OCR errors: \"спилобата\"→\"стилобата\", \"Tun\"→\"Тип\", \"опм.\"→\"отм.\"\r\n4. For canonical_name: normalize the material name (fix typos, standardize, remove \"или аналог\").\r\n5. For canonical_key: create a lowercase Latin slug (transliterate Russian, replace spaces with underscores).\r\n6. Parse Russian numeric format: \"202,6\" means 202.6; \"1 692,9\" means 1692.9.\r\n7. Unit should be standardized: м2, м3, шт, м.п., кг, т, л, компл.\r\n8. \"мм\" is a THICKNESS, not a quantity unit — put thickness in description field.\r\n9. DO NOT extract normative documents (ГОСТ, СП, СНиП, ФЗ, Постановление) as materials.\r\n10. DO NOT extract section headers or generic category names.\r\n11. DO NOT extract cross-references (see раздел, см. лист, см. 133/23...).\r\n\r\nFOR TYPE C (Ведомость изделий — assemblies like ОГ-13, ОГ-14 with counts/lengths):\r\n- Return {\"items\": []} — assemblies are NOT individual materials.\r\n\r\nFOR TYPE B (Спецификация элементов — components grouped under an assembly):\r\n- \"construction\" field = the assembly name/mark (e.g., \"ОГ-13\", \"ОГ-14\", \"Витраж В-1\")\r\n- \"raw_name\" = the component material (e.g., \"Стальная труба 30x15x2 мм\")\r\n- Group headers like \"ОГ-13, L=4 700\" are assembly identifiers, NOT materials\r\n\r\nFOR TYPES A and D:\r\n- \"construction\" field = the structural element or location this material belongs to (e.g., \"Отделка стены\", \"Ступень дорожная\", \"Фпод.п-1\"), or null if no clear parent element\r\n- Extract each material row as a separate item\r\n\r\nEach item in the \"items\" array must have this structure:\r\n{\r\n  \"raw_name\": \"exact name from document\",\r\n  \"canonical_name\": \"normalized Russian name\",\r\n  \"canonical_key\": \"latin_slug_key\",\r\n  \"construction\": \"parent assembly or structural element name, or null\",\r\n  \"extra_params\": \"color RAL, additional specs, or null\",\r\n  \"quantity\": 123.4 or null,\r\n  \"unit\": \"м2\" or null,\r\n  \"mark\": \"position/mark identifier\" or null,\r\n  \"gost\": \"ГОСТ reference\" or null,\r\n  \"description\": \"thickness or additional description\" or null,\r\n  \"note\": \"remarks from примечание column\" or null,\r\n  \"source_snippet\": \"exact quote from source proving this item exists\",\r\n  \"confidence\": 0.9\r\n}\n\nDOCUMENT GLOSSARY (assemblies identified in this document — do NOT extract as materials):\n- ДР-1: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ДР-2: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ВУ: assembly — \"Высоковольтный усилитель\" → NOT a material, NOT a component\n- БЗ: assembly — \"Барьер электрический (воздействующий элемент)\" → NOT a material, NOT a component\n- КРП: assembly — \"Коробка ответвительная\" → NOT a material, NOT a component\n- ЗВИ-5: assembly — \"Колодка клеммная\" → NOT a material, NOT a component",
+      "userPrompt": "Page: 13\nBlock ID: 99CC-U9EW-X7M\n\nContent:\nBLOCK-990CC-U9EW-X7M\n| Номер кабеля | Номер линии | Трасса | | | Кабель | | | |\n|---|---|---|---|---|---|---|---|---|\n| | | Этаж | Начало | Этаж | Конец | Марка | Количество кабелей, сечение | Общая длина, м |\n| ДР-1 | | | | | | | | |\n| 1 | | -2-й этажотм.-7.650 | ЭЩ ИТП (пом. 12.2) | -2-й этажотм.-7.650 | ЭЩ пом. 12.2 (розетка блока ДР-1) | ППГнг(А)-НФ | 3x1,5 мм2 | 10 |\n| 2 | Гр.1 | -2-й этажотм.-7.650 | ДР-1 (пом. 12.2) | -2-й этажотм.-7.650 | ВУ 1-1-1 - ВУ 1-1-4пом. 12.2, 12.1, 7 | ППГнг(А)-НФ | 2x1,5 мм2 | 74 |\n| 3 | Гр.2 | -2-й этажотм.-7.650 | ДР-1 (пом. 12.2) | -2-й этажотм.-7.650 | ВУ 1-2-5 - ВУ 1-2-7пом. 8 | ППГнг(А)-НФ | 2x1,5 мм2 | 93 |\n| 4 | Гр.3 | -2-й этажотм.-7.650 | ДР-1 (пом. 12.2) | -2-й этажотм.-7.650 | ВУ 1-3-8 - ВУ 1-3-10пом. 9, 11, 10 | ППГнг(А)-НФ | 2x1,5 мм2 | 116 |\n| ДР-2 | | | | | | | | |\n| 5 | | -1-й этажотм.-3.750 | ВРУ Жл (пом. 8) | -1-й этажотм.-6.450 | ВРУ Жл пом. 8 (розетка блока ДР-2) | ППГнг(А)-НФ | 3x1,5 мм2 | 10 |\n| 6 | Гр.1 | -1-й этажотм.-3.750 | ДР-2 (пом. 8) | -1-й этажотм.-3.750 | ВУ 2-1-1 - ВУ 2-1-4пом. 8, 11, 7 | ППГнг(А)-НФ | 2x1,5 мм2 | 79 |\n| 7 | Гр.2 | -1-й этажотм.-3.750 | ДР-2 (пом. 8) | -1-й этажотм.-3.750 | ВУ 2-2-5 - ВУ 2-2-6пом. 4, 16 | ППГнг(А)-НФ | 2x1,5 мм2 | 107 |\n| 8 | Гр.3 | -1-й этажотм.-3.750 | ДР-2 (пом. 8) | -1-й этажотм.-3.750 | ВУ 2-3-7 - ВУ 2-3-9пом. 13, 9, 10 | ППГнг(А)-НФ | 2x1,5 мм2 | 82 |\n| 9 | Гр.4 | -1-й этажотм.-3.750 | ДР-2 (пом. 8) | -1-й этажотм.-3.750 | ВУ 2-4-10 - ВУ 2-4-11пом. 15, 12 | ППГнг(А)-НФ | 2x1,5 мм2 | 104 |",
+      "rawResponse": "",
+      "parsedItemsCount": 0,
+      "validItemsCount": 0,
+      "droppedItems": [],
+      "responseKeys": [],
+      "usage": null,
+      "hasImage": false,
+      "durationMs": 0,
+      "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]"
+    },
+    {
+      "timestamp": "2026-03-03T14:39:46.387Z",
+      "blockUid": "YDK7-G93T-9TL",
+      "blockType": "TEXT",
+      "phase": "Фаза 2",
+      "systemPrompt": "You are a construction BOM (Bill of Materials) extractor for Russian architectural documentation.\r\nYour task is to extract materials, components, and quantities from the provided content.\r\n\r\nANALYSE THE CONTENT STRUCTURE FIRST:\r\nDetermine what type of content you are looking at:\r\nA) \"Ведомость материалов\" / \"Сводная ведомость материалов\" — a material inventory list with quantities\r\nB) \"Спецификация элементов\" — a specification of assembly components (e.g., each railing ОГ-13 has sub-components)\r\nC) \"Ведомость изделий\" — an inventory of finished assemblies/products (e.g., list of railings ОГ-13, ОГ-14 with lengths)\r\nD) Other table with materials/quantities\r\n\r\nRULES:\r\n1. Extract ONLY materials/elements explicitly mentioned in the content.\r\n2. DO NOT invent or hallucinate materials not present in the source.\r\n3. Fix common OCR errors: \"спилобата\"→\"стилобата\", \"Tun\"→\"Тип\", \"опм.\"→\"отм.\"\r\n4. For canonical_name: normalize the material name (fix typos, standardize, remove \"или аналог\").\r\n5. For canonical_key: create a lowercase Latin slug (transliterate Russian, replace spaces with underscores).\r\n6. Parse Russian numeric format: \"202,6\" means 202.6; \"1 692,9\" means 1692.9.\r\n7. Unit should be standardized: м2, м3, шт, м.п., кг, т, л, компл.\r\n8. \"мм\" is a THICKNESS, not a quantity unit — put thickness in description field.\r\n9. DO NOT extract normative documents (ГОСТ, СП, СНиП, ФЗ, Постановление) as materials.\r\n10. DO NOT extract section headers or generic category names.\r\n11. DO NOT extract cross-references (see раздел, см. лист, см. 133/23...).\r\n\r\nFOR TYPE C (Ведомость изделий — assemblies like ОГ-13, ОГ-14 with counts/lengths):\r\n- Return {\"items\": []} — assemblies are NOT individual materials.\r\n\r\nFOR TYPE B (Спецификация элементов — components grouped under an assembly):\r\n- \"construction\" field = the assembly name/mark (e.g., \"ОГ-13\", \"ОГ-14\", \"Витраж В-1\")\r\n- \"raw_name\" = the component material (e.g., \"Стальная труба 30x15x2 мм\")\r\n- Group headers like \"ОГ-13, L=4 700\" are assembly identifiers, NOT materials\r\n\r\nFOR TYPES A and D:\r\n- \"construction\" field = the structural element or location this material belongs to (e.g., \"Отделка стены\", \"Ступень дорожная\", \"Фпод.п-1\"), or null if no clear parent element\r\n- Extract each material row as a separate item\r\n\r\nEach item in the \"items\" array must have this structure:\r\n{\r\n  \"raw_name\": \"exact name from document\",\r\n  \"canonical_name\": \"normalized Russian name\",\r\n  \"canonical_key\": \"latin_slug_key\",\r\n  \"construction\": \"parent assembly or structural element name, or null\",\r\n  \"extra_params\": \"color RAL, additional specs, or null\",\r\n  \"quantity\": 123.4 or null,\r\n  \"unit\": \"м2\" or null,\r\n  \"mark\": \"position/mark identifier\" or null,\r\n  \"gost\": \"ГОСТ reference\" or null,\r\n  \"description\": \"thickness or additional description\" or null,\r\n  \"note\": \"remarks from примечание column\" or null,\r\n  \"source_snippet\": \"exact quote from source proving this item exists\",\r\n  \"confidence\": 0.9\r\n}\n\nDOCUMENT GLOSSARY (assemblies identified in this document — do NOT extract as materials):\n- ДР-1: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ДР-2: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ВУ: assembly — \"Высоковольтный усилитель\" → NOT a material, NOT a component\n- БЗ: assembly — \"Барьер электрический (воздействующий элемент)\" → NOT a material, NOT a component\n- КРП: assembly — \"Коробка ответвительная\" → NOT a material, NOT a component\n- ЗВИ-5: assembly — \"Колодка клеммная\" → NOT a material, NOT a component",
+      "userPrompt": "Page: 14\nBlock ID: YDK7-G93T-9TL\n\nContent:\nВЛОК:УДК7-093Т-9ТЛ| Поз. | Наименование и техническая характеристика | Тип, марка, обозначение документа, опросного листа | Код продукции | Поставщик | Ед. измерения | Количество | Масса 1 ед. кг | Примечание |\n|---|---|---|---|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |\n| Электрический дегазатор \"ДЕРСИС\" в составе: | | | | | | | | |\n| 1 | Дегазатор (ДР) | ТУ 7031-002-33227782-2014Сертификат РОСС RU.HB34.H01939 | | 000 \"АМТЦ\" | шт | 2 | | |\n| 2 | Высоковольтный усилитель (ВУ) | ТУ 7031-002-33227782-2014Сертификат РОСС RU.HB34.H01939 | | 000 \"АМТЦ\" | шт | 21 | | |\n| 3 | Барьер электрический (БЗ) | ТУ 7031-002-33227782-2014Сертификат РОСС RU.HB34.H01939 | | 000 \"АМТЦ\" | м | 42 | | |\n| Кабели и кабеленесущие изделия | | | | | | | | |\n| 4 | Кабель силовой с медными жилами с пониженным дымо- и газовыделением | ППГн2(А)-НФ 3х1,5 мм2 | | 000 \"Конкорд\" | м | 20 | | возможна замена на аналог |\n| 5 | Кабель силовой с медными жилами с пониженным дымо- и газовыделением | ППГн2(А)-НФ 2х1,5 мм2 | | 000 \"Конкорд\" | м | 655 | | возможна замена на аналог |\n| 6 | Кабель высоковольтный сечением 0,35 мм | ПВМТ-40 | | ОАО \"Беларуськабель\" | м | 42 | | |\n| 7 | Труба гофрированная из ПВХ, ф20мм | 91920 | | АО \"ДКС\" | м | 467 | | возможна замена на аналог |\n| Электроустановочные и коммутационные изделия | | | | | | | | |\n| 8 | Коробка ответвительная | КРП | | 000 \"Нептун\" | шт | 42 | | возможна замена на аналог |\n| 9 | Колодка клеммная | ЗВИ-5 | | \"ИЕК\" | шт | 21 | | возможна замена на аналог |\n| 10 | Штепсельная розетка с заземляющим контактом | Серия Quieo | | Legrand SNC | шт | 2 | | возможна замена на аналог |\n| Прочие затраты | | | | | | | | |\n| 11 | Монтажный клей Tytan Classic Fix Professional 310 мл | | | TITAN / TYTAN | шт | 9 | | возможна замена на аналог |\n| 12 | Плакат по технике безопасности (система ОЗДС) | | | | шт | 21 | | |",
+      "rawResponse": "",
+      "parsedItemsCount": 0,
+      "validItemsCount": 0,
+      "droppedItems": [],
+      "responseKeys": [],
+      "usage": null,
+      "hasImage": false,
+      "durationMs": 0,
+      "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]"
+    },
+    {
+      "timestamp": "2026-03-03T14:39:50.290Z",
+      "blockUid": "9ACR-NUTX-HQ3",
+      "blockType": "TEXT",
+      "phase": "Фаза 2",
+      "systemPrompt": "You are a construction BOM (Bill of Materials) extractor for Russian architectural documentation.\r\nYour task is to extract materials, components, and quantities from the provided content.\r\n\r\nANALYSE THE CONTENT STRUCTURE FIRST:\r\nDetermine what type of content you are looking at:\r\nA) \"Ведомость материалов\" / \"Сводная ведомость материалов\" — a material inventory list with quantities\r\nB) \"Спецификация элементов\" — a specification of assembly components (e.g., each railing ОГ-13 has sub-components)\r\nC) \"Ведомость изделий\" — an inventory of finished assemblies/products (e.g., list of railings ОГ-13, ОГ-14 with lengths)\r\nD) Other table with materials/quantities\r\n\r\nRULES:\r\n1. Extract ONLY materials/elements explicitly mentioned in the content.\r\n2. DO NOT invent or hallucinate materials not present in the source.\r\n3. Fix common OCR errors: \"спилобата\"→\"стилобата\", \"Tun\"→\"Тип\", \"опм.\"→\"отм.\"\r\n4. For canonical_name: normalize the material name (fix typos, standardize, remove \"или аналог\").\r\n5. For canonical_key: create a lowercase Latin slug (transliterate Russian, replace spaces with underscores).\r\n6. Parse Russian numeric format: \"202,6\" means 202.6; \"1 692,9\" means 1692.9.\r\n7. Unit should be standardized: м2, м3, шт, м.п., кг, т, л, компл.\r\n8. \"мм\" is a THICKNESS, not a quantity unit — put thickness in description field.\r\n9. DO NOT extract normative documents (ГОСТ, СП, СНиП, ФЗ, Постановление) as materials.\r\n10. DO NOT extract section headers or generic category names.\r\n11. DO NOT extract cross-references (see раздел, см. лист, см. 133/23...).\r\n\r\nFOR TYPE C (Ведомость изделий — assemblies like ОГ-13, ОГ-14 with counts/lengths):\r\n- Return {\"items\": []} — assemblies are NOT individual materials.\r\n\r\nFOR TYPE B (Спецификация элементов — components grouped under an assembly):\r\n- \"construction\" field = the assembly name/mark (e.g., \"ОГ-13\", \"ОГ-14\", \"Витраж В-1\")\r\n- \"raw_name\" = the component material (e.g., \"Стальная труба 30x15x2 мм\")\r\n- Group headers like \"ОГ-13, L=4 700\" are assembly identifiers, NOT materials\r\n\r\nFOR TYPES A and D:\r\n- \"construction\" field = the structural element or location this material belongs to (e.g., \"Отделка стены\", \"Ступень дорожная\", \"Фпод.п-1\"), or null if no clear parent element\r\n- Extract each material row as a separate item\r\n\r\nEach item in the \"items\" array must have this structure:\r\n{\r\n  \"raw_name\": \"exact name from document\",\r\n  \"canonical_name\": \"normalized Russian name\",\r\n  \"canonical_key\": \"latin_slug_key\",\r\n  \"construction\": \"parent assembly or structural element name, or null\",\r\n  \"extra_params\": \"color RAL, additional specs, or null\",\r\n  \"quantity\": 123.4 or null,\r\n  \"unit\": \"м2\" or null,\r\n  \"mark\": \"position/mark identifier\" or null,\r\n  \"gost\": \"ГОСТ reference\" or null,\r\n  \"description\": \"thickness or additional description\" or null,\r\n  \"note\": \"remarks from примечание column\" or null,\r\n  \"source_snippet\": \"exact quote from source proving this item exists\",\r\n  \"confidence\": 0.9\r\n}\n\nDOCUMENT GLOSSARY (assemblies identified in this document — do NOT extract as materials):\n- ДР-1: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ДР-2: assembly — \"Дератизатор (блок управления системы ОЗДС)\" → NOT a material, NOT a component\n- ВУ: assembly — \"Высоковольтный усилитель\" → NOT a material, NOT a component\n- БЗ: assembly — \"Барьер электрический (воздействующий элемент)\" → NOT a material, NOT a component\n- КРП: assembly — \"Коробка ответвительная\" → NOT a material, NOT a component\n- ЗВИ-5: assembly — \"Колодка клеммная\" → NOT a material, NOT a component",
+      "userPrompt": "Page: 15\nBlock ID: 9ACR-NUTX-HQ3\n\nContent:\n| ЭЩ ИТП на -2-м этаже на опм. -7,650,№ пом. 12.2 | В помещении ЭЩ на -2-м этаже на опм. -7,650 предусмотреть установку одного автоматического выключателя (номинал 10А) в распределительный шкаф.Электроснабжение ОЗДС допускается осуществлять по III категории надежности, в соответствии с ПУЭ. Количество Дератизаторов: 1 шт. Напряжение сети: 220 ВОбщая потребляемая мощность: 20 Вт |\n|---|---|\n| ВРУ Жл на -1-м этаже на опм. -3,750,№ пом. 8 | В помещении ЭЩ на -1-м этаже на опм. -3,750 предусмотреть установку одного автоматического выключателя (номинал 10А) в распределительный шкаф.Электроснабжение ОЗДС допускается осуществлять по III категории надежности, в соответствии с ПУЭ. Количество Дератизаторов: 1 шт. Напряжение сети: 220 ВОбщая потребляемая мощность: 20 Вт |",
+      "rawResponse": "",
+      "parsedItemsCount": 0,
+      "validItemsCount": 0,
+      "droppedItems": [],
+      "responseKeys": [],
+      "usage": null,
+      "hasImage": false,
+      "durationMs": 0,
+      "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]"
+    },
+    {
+      "blockUid": "FLUR-P76Y-CH4",
+      "blockType": "IMAGE",
+      "phase": "Фаза 3",
+      "systemPrompt": "You are extracting construction layer cakes (строительные \"пироги\") from Russian architectural cross-section drawings.\r\n\r\nYour input is a description of a cross-section, section, or detail drawing with text annotations.\r\n\r\nTASK: Extract the ordered list of construction layers (пирог) described in the drawing text.\r\n\r\nRULES:\r\n1. Look for layer descriptions in \"Текст на чертеже:\" section — these are the most reliable.\r\n2. A layer description typically includes: material name + thickness (e.g., \"Облицовка плитами натурального камня - гранит на клею -20мм\").\r\n3. Each layer = one item in the output.\r\n4. \"construction\" field = the name/identifier of the cross-section (e.g., \"Сечение Л7-Л7\", \"Узел А-А\", \"Разрез 1-1\").\r\n5. \"raw_name\" = the layer material (e.g., \"Облицовка плитами натурального камня - гранит\").\r\n6. \"description\" = thickness if mentioned (e.g., \"20 мм\").\r\n7. \"quantity\" = null (layers don't have quantities in cross-sections).\r\n8. \"unit\" = null.\r\n9. \"note\" = any reference to another document (e.g., \"см. 133/23-ГК-КЖ23\").\r\n10. Preserve the layer ORDER as it appears in the drawing (top to bottom or outside to inside).\r\n11. DO NOT extract dimensional annotations, axis labels, or elevation marks as layers.\r\n12. DO NOT extract cross-references to other sheets (люк-лаз, стремянка, etc.) as layers.\r\n13. If no layer cake structure is found (only dimensions/axes), return {\"items\": []}.\r\n14. If the drawing text is ambiguous and an image is provided, use it to verify the layer sequence.\r\n\r\nEach item in the \"items\" array must have this structure:\r\n{\r\n  \"raw_name\": \"layer material name\",\r\n  \"canonical_name\": \"normalized Russian name\",\r\n  \"canonical_key\": \"latin_slug_key\",\r\n  \"construction\": \"cross-section name from drawing header\",\r\n  \"extra_params\": null,\r\n  \"quantity\": null,\r\n  \"unit\": null,\r\n  \"mark\": null,\r\n  \"gost\": null,\r\n  \"description\": \"thickness in mm if mentioned, e.g. '20 мм'\",\r\n  \"note\": \"reference to other document if any\",\r\n  \"source_snippet\": \"exact quote from drawing text\",\r\n  \"confidence\": 0.85\r\n}",
+      "userPrompt": "Page: 10\nBlock ID: FLUR-P76Y-CH4\n\nContent:\n**[ИЗОБРАЖЕНИЕ]** | Тип: Узел\n\n**Краткое описание:** Схема узла подключения барьера электролизуемого к линии питания. Чертеж содержит детализацию электрического соединения и монтажных элементов.\n\n**Описание:** На изображении представлена схема подключения оборудования. В нижней части расположен горизонтальный элемент 'Барьер электризуемый', закрашенный красным цветом, внутри которого проходит 'Плетенка ПМЛ', обозначенная сетчатой штриховкой. К барьеру через клеммную колодку подведен кабель, совершающий поворот на 90 градусов вверх. Вертикальный участок кабеля обозначен как 'Провод ПВМТ в гофротрубе' и закреплен с помощью держателя с защелкой. В верхней части вертикальная линия обрывается зигзагообразной линией разрыва с подписью о направлении к блоку высоковольтного усилителя. Все элементы снабжены выносками с полками и текстовыми пояснениями. Использованы сплошные тонкие и основные линии для контуров и выносок.\n\n**Текст на чертеже:** Схема узла подключения барьера электролизуемого к линии питания. К блоку высоковольтного усилителя. Провод ПВМТ в гофротрубе. Держатель с защелкой для трубы. Колодка клеммная. Плетенка ПМЛ. Барьер электризуемый. Поворот на 90 градусов.\n\n**Сущности:** ПВМТ, ПМЛ, 90 градусов, Барьер электризуемый, Колодка клеммная, Гофротруба, Держатель с защелкой, Высоковольтный усилитель",
+      "rawResponse": "{\n  \"items\": []\n}",
+      "parsedItemsCount": 0,
+      "validItemsCount": 0,
+      "droppedItems": [],
+      "responseKeys": [
+        "items"
+      ],
+      "usage": {
+        "prompt_tokens": 1037,
+        "completion_tokens": 9,
+        "total_tokens": 1046,
+        "cost": 0.0005455,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0005455,
+          "upstream_inference_prompt_cost": 0.0005185,
+          "upstream_inference_completions_cost": 0.000027
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "hasImage": false,
+      "durationMs": 1163,
+      "timestamp": "2026-03-03T14:39:51.454Z"
+    },
+    {
+      "timestamp": "2026-03-03T14:39:56.223Z",
+      "blockUid": "4UXD-CRCK-R7A",
+      "blockType": "IMAGE",
+      "phase": "Фаза 3",
+      "systemPrompt": "You are extracting construction layer cakes (строительные \"пироги\") from Russian architectural cross-section drawings.\r\n\r\nYour input is a description of a cross-section, section, or detail drawing with text annotations.\r\n\r\nTASK: Extract the ordered list of construction layers (пирог) described in the drawing text.\r\n\r\nRULES:\r\n1. Look for layer descriptions in \"Текст на чертеже:\" section — these are the most reliable.\r\n2. A layer description typically includes: material name + thickness (e.g., \"Облицовка плитами натурального камня - гранит на клею -20мм\").\r\n3. Each layer = one item in the output.\r\n4. \"construction\" field = the name/identifier of the cross-section (e.g., \"Сечение Л7-Л7\", \"Узел А-А\", \"Разрез 1-1\").\r\n5. \"raw_name\" = the layer material (e.g., \"Облицовка плитами натурального камня - гранит\").\r\n6. \"description\" = thickness if mentioned (e.g., \"20 мм\").\r\n7. \"quantity\" = null (layers don't have quantities in cross-sections).\r\n8. \"unit\" = null.\r\n9. \"note\" = any reference to another document (e.g., \"см. 133/23-ГК-КЖ23\").\r\n10. Preserve the layer ORDER as it appears in the drawing (top to bottom or outside to inside).\r\n11. DO NOT extract dimensional annotations, axis labels, or elevation marks as layers.\r\n12. DO NOT extract cross-references to other sheets (люк-лаз, стремянка, etc.) as layers.\r\n13. If no layer cake structure is found (only dimensions/axes), return {\"items\": []}.\r\n14. If the drawing text is ambiguous and an image is provided, use it to verify the layer sequence.\r\n\r\nEach item in the \"items\" array must have this structure:\r\n{\r\n  \"raw_name\": \"layer material name\",\r\n  \"canonical_name\": \"normalized Russian name\",\r\n  \"canonical_key\": \"latin_slug_key\",\r\n  \"construction\": \"cross-section name from drawing header\",\r\n  \"extra_params\": null,\r\n  \"quantity\": null,\r\n  \"unit\": null,\r\n  \"mark\": null,\r\n  \"gost\": null,\r\n  \"description\": \"thickness in mm if mentioned, e.g. '20 мм'\",\r\n  \"note\": \"reference to other document if any\",\r\n  \"source_snippet\": \"exact quote from drawing text\",\r\n  \"confidence\": 0.85\r\n}",
+      "userPrompt": "Page: 12\nBlock ID: 4UXD-CRCK-R7A\n\nContent:\n**[ИЗОБРАЖЕНИЕ]** | Тип: Узел\n\n**Краткое описание:** Типовой узел проходки кабеля через стены. Чертеж демонстрирует конструктивное решение по герметизации кабельного прохода.\n\n**Описание:** На чертеже представлено сечение вертикальной стены с проходящим сквозь неё горизонтальным кабелем. Стена обозначена двумя параллельными вертикальными линиями с точечной штриховкой, имитирующей бетон или камень. В месте прохода установлена металлическая гильза (труба), показанная прямоугольным контуром. Внутри гильзы проходит кабель в гофрированной оболочке, изображенной в виде повторяющихся вертикальных сегментов. Свободное пространство между гофрой и гильзой заполнено монтажной пеной, обозначенной плотной точечной штриховкой. К элементам узла подведены четыре выноски с полками, содержащими пояснительный текст. В верхней и нижней частях стены видны линии обрыва со стрелками.\n\n**Текст на чертеже:** Типовой узел проходки кабеля через стены Пена монтажная противопожарная Кабель в гофрированной трубе Ø20мм Труба металлическая Ø25 Стена\n\n**Сущности:** Типовой узел, проходка кабеля, Пена монтажная противопожарная, Кабель в гофрированной трубе, Ø20мм, Труба металлическая, Ø25, Стена",
+      "rawResponse": "",
+      "parsedItemsCount": 0,
+      "validItemsCount": 0,
+      "droppedItems": [],
+      "responseKeys": [],
+      "usage": null,
+      "hasImage": false,
+      "durationMs": 0,
+      "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]"
+    },
+    {
+      "timestamp": "2026-03-03T14:40:01.211Z",
+      "blockUid": "9GWH-DK7G-7RH",
+      "blockType": "IMAGE",
+      "phase": "Фаза 3",
+      "systemPrompt": "You are extracting construction layer cakes (строительные \"пироги\") from Russian architectural cross-section drawings.\r\n\r\nYour input is a description of a cross-section, section, or detail drawing with text annotations.\r\n\r\nTASK: Extract the ordered list of construction layers (пирог) described in the drawing text.\r\n\r\nRULES:\r\n1. Look for layer descriptions in \"Текст на чертеже:\" section — these are the most reliable.\r\n2. A layer description typically includes: material name + thickness (e.g., \"Облицовка плитами натурального камня - гранит на клею -20мм\").\r\n3. Each layer = one item in the output.\r\n4. \"construction\" field = the name/identifier of the cross-section (e.g., \"Сечение Л7-Л7\", \"Узел А-А\", \"Разрез 1-1\").\r\n5. \"raw_name\" = the layer material (e.g., \"Облицовка плитами натурального камня - гранит\").\r\n6. \"description\" = thickness if mentioned (e.g., \"20 мм\").\r\n7. \"quantity\" = null (layers don't have quantities in cross-sections).\r\n8. \"unit\" = null.\r\n9. \"note\" = any reference to another document (e.g., \"см. 133/23-ГК-КЖ23\").\r\n10. Preserve the layer ORDER as it appears in the drawing (top to bottom or outside to inside).\r\n11. DO NOT extract dimensional annotations, axis labels, or elevation marks as layers.\r\n12. DO NOT extract cross-references to other sheets (люк-лаз, стремянка, etc.) as layers.\r\n13. If no layer cake structure is found (only dimensions/axes), return {\"items\": []}.\r\n14. If the drawing text is ambiguous and an image is provided, use it to verify the layer sequence.\r\n\r\nEach item in the \"items\" array must have this structure:\r\n{\r\n  \"raw_name\": \"layer material name\",\r\n  \"canonical_name\": \"normalized Russian name\",\r\n  \"canonical_key\": \"latin_slug_key\",\r\n  \"construction\": \"cross-section name from drawing header\",\r\n  \"extra_params\": null,\r\n  \"quantity\": null,\r\n  \"unit\": null,\r\n  \"mark\": null,\r\n  \"gost\": null,\r\n  \"description\": \"thickness in mm if mentioned, e.g. '20 мм'\",\r\n  \"note\": \"reference to other document if any\",\r\n  \"source_snippet\": \"exact quote from drawing text\",\r\n  \"confidence\": 0.85\r\n}",
+      "userPrompt": "Page: 12\nBlock ID: 9GWH-DK7G-7RH\n\nContent:\n**[ИЗОБРАЖЕНИЕ]** | Тип: Узел\n\n**Краткое описание:** Типовой узел проходки кабеля через перекрытие. Чертеж содержит детализацию монтажа кабеля в гофрированной трубе с использованием противопожарной пены.\n\n**Описание:** На чертеже представлен вертикальный разрез узла прохода коммуникаций через плиту перекрытия. Перекрытие обозначено горизонтальным прямоугольником с точечной штриховкой, имитирующей бетон, и ограничено линиями обрыва по бокам. Через центр перекрытия вертикально проходит металлическая труба, внутри которой расположена гофрированная труба с кабелем. Пространство между металлической трубой и гофрированной трубой заполнено противопожарной монтажной пеной, обозначенной штриховкой в виде мелких крестиков. К элементам конструкции подведены четыре выноски с текстовыми пояснениями. В нижней правой части изображения расположен синий штамп согласования 'В ПРОИЗВОДСТВО РАБОТ' и QR-код.\n\n**Текст на чертеже:** Типовой узел проходки кабеля через перекрытия. Кабель в гофрированной трубе Ø20мм. Труба металлическая Ø25. Перекрытие. Пена монтажная противопожарная. В ПРОИЗВОДСТВО РАБОТ ООО 'СР.Девелопмент' ГИП Егоров А.С. 17.06.2025\n\n**Сущности:** Ø20мм, Ø25, Кабель, Гофрированная труба, Металлическая труба, Перекрытие, Противопожарная пена, Егоров А.С., 17.06.2025, ООО СР.Девелопмент",
+      "rawResponse": "",
+      "parsedItemsCount": 0,
+      "validItemsCount": 0,
+      "droppedItems": [],
+      "responseKeys": [],
+      "usage": null,
+      "hasImage": false,
+      "durationMs": 0,
+      "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]"
+    }
+  ],
+  "filterLog": [],
+  "ruleBasedLog": [
+    {
+      "blockUid": "4JLY-JUH9-VJX",
+      "phase": "Фаза 2",
+      "extractedCount": 0,
+      "items": []
+    },
+    {
+      "blockUid": "4497-74VA-LGE",
+      "phase": "Фаза 2",
+      "extractedCount": 0,
+      "items": []
+    },
+    {
+      "blockUid": "99CC-U9EW-X7M",
+      "phase": "Фаза 2",
+      "extractedCount": 0,
+      "items": []
+    },
+    {
+      "blockUid": "YDK7-G93T-9TL",
+      "phase": "Фаза 2",
+      "extractedCount": 0,
+      "items": []
+    },
+    {
+      "blockUid": "9ACR-NUTX-HQ3",
+      "phase": "Фаза 2",
+      "extractedCount": 0,
+      "items": []
+    }
+  ],
+  "phases": [
+    {
+      "name": "Фаза 1",
+      "ruleBasedBlocks": 0,
+      "ruleBasedFacts": 0,
+      "llmBlocks": 0,
+      "llmFacts": 0
+    },
+    {
+      "name": "Фаза 2",
+      "ruleBasedBlocks": 0,
+      "ruleBasedFacts": 0,
+      "llmBlocks": 6,
+      "llmFacts": 0
+    },
+    {
+      "name": "Фаза 3",
+      "ruleBasedBlocks": 0,
+      "ruleBasedFacts": 0,
+      "llmBlocks": 3,
+      "llmFacts": 0
+    }
+  ],
+  "summary": {
+    "totalMaterialFacts": 0,
+    "totalProductFacts": 0,
+    "glossaryCodes": 13,
+    "totalLlmCalls": 2,
+    "totalPromptTokens": 9572,
+    "totalCompletionTokens": 579,
+    "totalTokens": 10151,
+    "imagesSent": 0,
+    "imagesTotal": 3,
+    "errors": [
+      "Фаза 2 TEXT:93TA-UFYV-639 — [\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]",
+      "Фаза 2 TEXT:4JLY-JUH9-VJX — [\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]",
+      "Фаза 2 TEXT:4497-74VA-LGE — [\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]",
+      "Фаза 2 TEXT:99CC-U9EW-X7M — [\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]",
+      "Фаза 2 TEXT:YDK7-G93T-9TL — [\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]",
+      "Фаза 2 TEXT:9ACR-NUTX-HQ3 — [\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]",
+      "Фаза 3 IMAGE:4UXD-CRCK-R7A — [\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]",
+      "Фаза 3 IMAGE:9GWH-DK7G-7RH — [\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received array\"\n  }\n]"
+    ]
+  }
+}
