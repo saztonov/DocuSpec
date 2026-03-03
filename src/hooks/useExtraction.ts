@@ -76,14 +76,14 @@ export function useExtraction(docId: string) {
 
       const { data: doc, error: docError } = await supabase
         .from('documents')
-        .select('raw_md, section_id, title')
+        .select('raw_md, section_id, filename')
         .eq('id', docId)
         .single();
 
       if (docError) throw new Error(`Ошибка загрузки документа: ${docError.message}`);
       if (!doc?.raw_md) throw new Error('Документ не найден или raw_md пуст');
 
-      logger.logSessionInit(docId, (doc as { title?: string }).title || 'unknown', model || 'default');
+      logger.logSessionInit(docId, doc.filename || 'unknown', model || 'default');
 
       // Загрузить section.code если есть section_id
       // sectionCode будет использован в будущих итерациях для выбора промптов по разделу
