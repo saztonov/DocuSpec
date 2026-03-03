@@ -16,8 +16,6 @@ import {
   Collapse,
   Empty,
 } from 'antd';
-
-const { Panel } = Collapse;
 import {
   FileTextOutlined,
   ExperimentOutlined,
@@ -37,6 +35,7 @@ import BlockLink from '../components/BlockLink.tsx';
 import type { DbDocument, DbDocPage, DbDocBlock, DbMaterialFact, DbBomSummary } from '../types/database.ts';
 
 const { Title, Text } = Typography;
+const { Panel } = Collapse;
 
 // ── Status color mapping ──
 const STATUS_COLOR: Record<string, string> = {

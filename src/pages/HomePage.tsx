@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Typography, Upload, Space, Table, Tag, App, Divider, Select, Row, Col, Button, Popconfirm } from 'antd';
-import { InboxOutlined, FileTextOutlined, DeleteOutlined, FileJsonOutlined, UploadOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { InboxOutlined, FileTextOutlined, DeleteOutlined, FileOutlined, UploadOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase.ts';
 import { useDocument } from '../hooks/useDocument.ts';
 import { useProjects } from '../hooks/useProjects.ts';
@@ -235,7 +235,7 @@ export default function HomePage() {
       <div style={{ border: '1px dashed #d9d9d9', borderRadius: 8, padding: '12px 16px', background: '#fafafa' }}>
         <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
           <Space>
-            <FileJsonOutlined style={{ color: '#8c8c8c', fontSize: 20 }} />
+            <FileOutlined style={{ color: '#8c8c8c', fontSize: 20 }} />
             <div>
               <Text strong style={{ color: '#595959' }}>JSON с изображениями (опционально)</Text>
               <br />
