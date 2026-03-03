@@ -74,13 +74,14 @@ export function useExtraction(docId: string) {
       // ── Загрузить документ и section.code ──
       setProgress(p => ({ ...p, status: 'rule_based', phase: 'Загрузка документа', errorMessage: null }));
 
-      const { data: doc } = await supabase
+      const { data: doc, error: docError } = await supabase
         .from('documents')
         .select('raw_md, section_id, title')
         .eq('id', docId)
         .single();
 
-      if (!doc?.raw_md) throw new Error('Document not found or raw_md is empty');
+      if (docError) throw new Error(`Ошибка загрузки документа: ${docError.message}`);
+      if (!doc?.raw_md) throw new Error('Документ не найден или raw_md пуст');
 
       logger.logSessionInit(docId, (doc as { title?: string }).title || 'unknown', model || 'default');
 
@@ -634,6 +635,9 @@ export function useExtraction(docId: string) {
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Extraction failed';
+      console.error('[DocuSpec] Ошибка извлечения:', message);
+      logger.logSessionInit(docId, 'error', model || 'unknown');
+      logger.logLlmError('global', 'extraction', 'init', message, '', '');
       setProgress(p => ({ ...p, status: 'error', errorMessage: message }));
       await supabase
         .from('documents')
