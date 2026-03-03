@@ -226,13 +226,12 @@ function MaterialsTab({ docId }: { docId: string }) {
   }
 
   const columns = [
-    { title: 'Конструкция', dataIndex: 'construction', key: 'construction', width: 150, ellipsis: true, render: (v: string | null) => v ?? '—' },
+    { title: 'Конструкция', dataIndex: 'construction', key: 'construction', width: 150, render: (v: string | null) => v ?? '—' },
     {
       title: 'Материал',
       dataIndex: 'canonical_name',
       key: 'canonical_name',
-      width: 240,
-      ellipsis: true,
+      width: 285,
       render: (val: string, record: DbMaterialFact) => {
         if (editingKey === record.id) {
           return (
@@ -256,12 +255,12 @@ function MaterialsTab({ docId }: { docId: string }) {
         );
       },
     },
-    { title: 'Доп. пар.', dataIndex: 'extra_params', key: 'extra_params', width: 110, ellipsis: true, render: (v: string | null) => v ?? '—' },
+    { title: 'Доп. пар.', dataIndex: 'extra_params', key: 'extra_params', width: 110, render: (v: string | null) => v ?? '—' },
     { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 55 },
     { title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 75, render: (v: number | null) => v ?? '—' },
-    { title: 'Марка / ГОСТ', key: 'mark_gost', width: 130, ellipsis: true, render: (_: unknown, r: DbMaterialFact) => [r.mark, r.gost].filter(Boolean).join(' / ') || '—' },
-    { title: 'Блок', dataIndex: 'block_id', key: 'block_id', width: 130, render: (v: string) => <BlockLink blockId={v} /> },
-    { title: 'Примечание', dataIndex: 'note', key: 'note', width: 140, ellipsis: true, render: (v: string | null) => v ?? '—' },
+    { title: 'Марка / ГОСТ', key: 'mark_gost', width: 130, render: (_: unknown, r: DbMaterialFact) => [r.mark, r.gost].filter(Boolean).join(' / ') || '—' },
+    { title: 'Блок', dataIndex: 'block_id', key: 'block_id', width: 85, render: (v: string) => <BlockLink blockId={v} /> },
+    { title: 'Примечание', dataIndex: 'note', key: 'note', width: 140, render: (v: string | null) => v ?? '—' },
     {
       title: 'Увер.', dataIndex: 'confidence', key: 'confidence', width: 70,
       render: (v: number) => { const pct = Math.round(v * 100); return <Tag color={pct >= 80 ? 'green' : pct >= 50 ? 'orange' : 'red'}>{pct}%</Tag>; },
