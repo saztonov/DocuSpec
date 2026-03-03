@@ -100,8 +100,13 @@ export function useExtraction(docId: string) {
             } else {
               // Text blocks without tables — might still contain material mentions
               // Only send to LLM if content seems relevant (has quantity-like patterns)
-              const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг|т|л|компл)/i.test(block.content);
-              if (hasQuantityPattern) {
+              // Exclude compound units like кг/м3 (density), т/м3 etc. via negative lookahead
+              const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг(?![\s]*\/)|т(?![\s]*\/|олщ)|л(?!ист|ин)|компл|слоя?)/i.test(block.content);
+              // Skip general-purpose note sections that describe material types/properties
+              // without specifying construction quantities
+              const sectionLower = (block.sectionTitle || '').toLowerCase();
+              const isGeneralSection = /общие указания|общие характеристики|общие данные|условные обозначения|общие сведения/.test(sectionLower);
+              if (hasQuantityPattern && !isGeneralSection) {
                 blocksNeedingLlm.push({
                   block,
                   pageNo: page.pageNo,
@@ -115,7 +120,8 @@ export function useExtraction(docId: string) {
             const hasDrawingText = block.content.includes('Текст на чертеже:');
             const hasMaterialKeyword = /облицовк|камен|гранит|плит|стяжк|гидроизол|утеплител|кирпич|бетон|штукатурк|армир/i.test(block.content);
             // Note: мм excluded — it indicates thickness, not quantity
-            const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг|т|л|компл)/i.test(block.content);
+            // Exclude compound units like кг/м3 (density) via negative lookahead
+            const hasQuantityPattern = /\d+[,.]?\d*\s*(шт|м2|м3|м\.п\.|кг(?![\s]*\/)|т(?![\s]*\/|олщ)|л(?!ист|ин)|компл|слоя?)/i.test(block.content);
             // Skip legend/conditional notation blocks — they describe materials without quantities
             const isLegend = block.content.includes('Условные обозначения') || (block.content.includes('Тип: Легенда'));
 
@@ -164,8 +170,21 @@ export function useExtraction(docId: string) {
         setProgress(p => ({ ...p, status: 'merging' }));
 
         for (const [blockDbId, llmItems] of llmResults) {
+          // Post-filter LLM items: remove low-value extractions
+          const filteredLlmItems = llmItems.filter(item => {
+            // Keep items that have explicit quantity — these are valuable
+            if (item.quantity !== null) return true;
+            // Drop items with no quantity AND no unit AND low confidence
+            if (item.unit === null && item.confidence < 0.85) return false;
+            // Drop items whose name looks like a section header (short generic text, no specifics)
+            const nameLower = (item.canonical_name || item.raw_name).toLowerCase();
+            const isGenericHeader = /^(элементы|ограждения|перегородки|поручни|порученн|покрытия|наружная|стены|стена)\b/.test(nameLower);
+            if (isGenericHeader && item.quantity === null) return false;
+            return true;
+          });
+
           const ruleItems = ruleBasedResults.get(blockDbId) ?? [];
-          const merged = mergeResults(ruleItems, llmItems);
+          const merged = mergeResults(ruleItems, filteredLlmItems);
 
           // Only save LLM-unique items (rule-based already saved)
           const ruleKeys = new Set(ruleItems.map(i =>

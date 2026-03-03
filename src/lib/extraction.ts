@@ -25,6 +25,10 @@ RULES:
 12. DO NOT extract normative documents (ГОСТ, СП, СНиП, Федеральный закон, Постановление) as materials. These are references, not construction materials.
 13. If the content is a legend/conditional notation block ("Условные обозначения") that describes material types without explicit quantities — set quantity to null for each material.
 14. For tables with grouped rows (e.g. railing specifications with group headers like "ОГ-13, L=4 700" followed by component rows), extract BOTH the group header as a separate item (with its quantity) AND each component row.
+15. DO NOT extract materials that are only mentioned as references to other sections (phrases like "см. раздел", "см. лист", "см. 133/23-...", "детализация ... см."). These are cross-references, not material quantities.
+16. DO NOT extract section headers, category names, or generic grouping titles as materials (e.g. "Элементы фасада", "Ограждения лестниц", "Перегородки", "Поручни"). Only extract specific, named materials.
+17. DO NOT extract element marks/labels from drawings (e.g. "ДВ20-1Л", "ЛП1", "НП5", "ОГ-14", "Стремянка", "Люк-лаз") as materials unless they appear in a specification table with explicit quantities.
+18. DO NOT extract materials from general notes or instructions that describe material TYPES or PROPERTIES without specifying construction quantities (e.g. "стены выполнены из блоков D600" without an area or volume value).
 
 Each item in the "items" array must have this structure:
 {
@@ -84,6 +88,28 @@ function findColumnIndex(headers: string[], ...keywords: string[]): number {
   return -1;
 }
 
+/**
+ * Find quantity column index — more precise than generic findColumnIndex
+ * to avoid false positives like "колера" matching "кол".
+ */
+function findQtyColumnIndex(headers: string[]): number {
+  const h = headers.map(s => s.toLowerCase().trim());
+  // Try exact/specific patterns first, then broader ones
+  const patterns = [
+    (col: string) => col.includes('количество'),
+    (col: string) => col.includes('кол-во'),
+    (col: string) => col.includes('кол.шт') || col.includes('кол. шт'),
+    (col: string) => col.includes('кол.') && !col.includes('колер') && !col.includes('колон'),
+    (col: string) => /\bкол\b/.test(col),  // "кол" as a standalone word
+    (col: string) => col.includes('объем') || col.includes('объём'),
+  ];
+  for (const pattern of patterns) {
+    const idx = h.findIndex(pattern);
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
+
 function parseRussianNumber(text: string): number | null {
   if (!text || text.trim() === '' || text.trim() === '-') return null;
   // Remove spaces (thousand separators), replace comma with dot
@@ -123,7 +149,7 @@ function extractUnitFromHeader(header: string): string | null {
 function extractMaterialQty(table: ParsedTable): MaterialFactItem[] {
   const results: MaterialFactItem[] = [];
   const nameIdx = findColumnIndex(table.headers, 'наименование');
-  const qtyIdx = findColumnIndex(table.headers, 'количество', 'кол-во', 'кол', 'объем', 'объём');
+  const qtyIdx = findQtyColumnIndex(table.headers);
   const unitIdx = findColumnIndex(table.headers, 'ед.изм', 'ед.', 'ед');
 
   if (nameIdx === -1) return results;
@@ -199,7 +225,7 @@ function extractElementSpec(table: ParsedTable): MaterialFactItem[] {
   const results: MaterialFactItem[] = [];
   const markIdx = findColumnIndex(table.headers, 'марка');
   const descIdx = findColumnIndex(table.headers, 'описание', 'наименование');
-  const qtyIdx = findColumnIndex(table.headers, 'кол-во', 'кол', 'шт');
+  const qtyIdx = findQtyColumnIndex(table.headers) !== -1 ? findQtyColumnIndex(table.headers) : findColumnIndex(table.headers, 'шт');
   const noteIdx = findColumnIndex(table.headers, 'примечание');
 
   if (descIdx === -1 && markIdx === -1) return results;
@@ -231,19 +257,23 @@ function extractElementSpec(table: ParsedTable): MaterialFactItem[] {
   return results;
 }
 
+/** Generic names that should be replaced by the description column if available */
+const GENERIC_NAMES = ['инд. изготовления', 'инд.изготовления', 'индивидуальный', 'по проекту', 'по месту'];
+
 function extractSpecElements(table: ParsedTable): MaterialFactItem[] {
   const results: MaterialFactItem[] = [];
   const posIdx = findColumnIndex(table.headers, 'поз');
   const designationIdx = findColumnIndex(table.headers, 'обозначение');
   const nameIdx = findColumnIndex(table.headers, 'наименование', 'назначение');
-  const qtyIdx = findColumnIndex(table.headers, 'кол-во', 'кол', 'количество');
+  const descIdx = findColumnIndex(table.headers, 'описание');
+  const qtyIdx = findQtyColumnIndex(table.headers);
   const noteIdx = findColumnIndex(table.headers, 'примечание');
 
   const primaryNameIdx = nameIdx !== -1 ? nameIdx : designationIdx;
   if (primaryNameIdx === -1) return results;
 
   for (const row of table.rows) {
-    const rawName = row[primaryNameIdx]?.trim();
+    let rawName = row[primaryNameIdx]?.trim();
     if (!rawName || rawName.length < 3) continue;
 
     const mark = posIdx !== -1 ? row[posIdx]?.trim() || null : null;
@@ -252,16 +282,28 @@ function extractSpecElements(table: ParsedTable): MaterialFactItem[] {
     const designation = designationIdx !== -1 && designationIdx !== primaryNameIdx
       ? row[designationIdx]?.trim() || null
       : null;
+    const descText = descIdx !== -1 ? row[descIdx]?.trim() || null : null;
+
+    // If the name column is generic (e.g. "Инд. изготовления") and there's a description
+    // column with a more specific name, use the description as the canonical name
+    let canonicalName = rawName;
+    if (GENERIC_NAMES.includes(rawName.toLowerCase()) && descText && descText.length > 3) {
+      canonicalName = descText;
+    }
+    // Also incorporate mark into raw_name for uniqueness if mark is present and name is generic
+    if (GENERIC_NAMES.includes(rawName.toLowerCase()) && mark) {
+      rawName = `${mark} — ${canonicalName}`;
+    }
 
     results.push({
       raw_name: rawName,
-      canonical_name: rawName,
-      canonical_key: generateCanonicalKey(rawName),
+      canonical_name: canonicalName,
+      canonical_key: generateCanonicalKey(canonicalName),
       quantity,
       unit: 'шт',
       mark,
       gost: extractGost(rawName + ' ' + (designation || '') + ' ' + (note || '')),
-      description: designation,
+      description: descText || designation,
       note,
       source_snippet: buildSnippet(rawName, quantity, 'шт'),
       confidence: 0.9,
@@ -322,13 +364,10 @@ export async function llmExtractBatch(
       // Filter out items without source_snippet
       const validItems = validated.items.filter(item => item.source_snippet);
 
-      // Ensure canonical_key is generated
+      // Always regenerate canonical_key using our transliteration to ensure consistency.
+      // LLM-generated keys use different transliteration (e.g. й→j vs й→y) causing duplicates.
       for (const item of validItems) {
-        if (!item.canonical_key && item.canonical_name) {
-          item.canonical_key = generateCanonicalKey(item.canonical_name);
-        } else if (!item.canonical_key && item.raw_name) {
-          item.canonical_key = generateCanonicalKey(item.raw_name);
-        }
+        item.canonical_key = generateCanonicalKey(item.canonical_name || item.raw_name);
       }
 
       results.set(blockDbId, validItems);

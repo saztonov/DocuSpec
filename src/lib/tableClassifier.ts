@@ -2,6 +2,17 @@ import type { TableCategory } from '../types/extraction.ts';
 import type { ParsedTable } from '../types/parser.ts';
 
 /**
+ * Check if a column header represents a quantity column.
+ * Avoids false positives like "колера" (color) matching "кол".
+ */
+function isQtyHeader(col: string): boolean {
+  return col.includes('количество') || col.includes('кол-во') ||
+    col.includes('кол.шт') || col.includes('кол. шт') ||
+    (col.includes('кол.') && !col.includes('колер') && !col.includes('колон')) ||
+    /\bкол\b/.test(col);
+}
+
+/**
  * Classify a parsed markdown table by its column headers.
  * Returns a category that determines extraction strategy.
  */
@@ -28,7 +39,7 @@ export function classifyTable(table: ParsedTable): TableCategory {
   const hasDesignation = h.some(x => x.includes('обозначение'));
   const hasName = h.some(x => x.includes('наименование'));
   const hasQtyLike = h.some(x =>
-    x.includes('количество') || x.includes('кол-во') || x.includes('кол') ||
+    isQtyHeader(x) ||
     x.includes('объем') || x.includes('объём') || x.includes('площадь')
   );
   const sectionLower = (table.sectionContext || '').toLowerCase();
@@ -63,7 +74,7 @@ export function classifyTable(table: ParsedTable): TableCategory {
   // Direct material quantity tables: Наименование + Количество + Ед.изм.
   if (
     h.some(x => x.includes('наименование')) &&
-    h.some(x => x.includes('количество') || x.includes('кол-во') || x.includes('кол')) &&
+    h.some(x => isQtyHeader(x)) &&
     h.some(x => x.includes('ед') || x.includes('изм'))
   ) {
     return 'material_qty';
@@ -89,7 +100,7 @@ export function classifyTable(table: ParsedTable): TableCategory {
   if (
     h.some(x => x.includes('поз')) &&
     h.some(x => x.includes('обозначение') || x.includes('наименование')) &&
-    h.some(x => x.includes('кол'))
+    h.some(x => isQtyHeader(x))
   ) {
     return 'spec_elements';
   }
@@ -97,7 +108,7 @@ export function classifyTable(table: ParsedTable): TableCategory {
   // Element spec: Марка + Описание/Наименование + Кол-во (drainage, ventilation grilles)
   if (
     h.some(x => x.includes('марка')) &&
-    h.some(x => x.includes('кол') || x.includes('шт'))
+    h.some(x => isQtyHeader(x) || x.includes('шт'))
   ) {
     return 'element_spec';
   }
