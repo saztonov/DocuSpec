@@ -1,5 +1,8 @@
 import { z } from 'zod/v4';
 
+export type ItemKind = 'material' | 'equipment';
+export type QtyScope = 'per_unit' | 'total' | 'unknown';
+
 export const MaterialFactItemSchema = z.object({
   raw_name: z.string().min(1),
   canonical_name: z.string().nullable(),
@@ -14,6 +17,9 @@ export const MaterialFactItemSchema = z.object({
   note: z.string().nullable(),
   source_snippet: z.string().nullable(),
   confidence: z.number().min(0).max(1).default(0.8),
+  kind: z.enum(['material', 'equipment']).optional(),
+  qty_scope: z.enum(['per_unit', 'total', 'unknown']).nullable().optional(),
+  needs_review: z.boolean().optional(),
 });
 
 export const ExtractionResponseSchema = z.object({
@@ -27,7 +33,7 @@ export type ExtractionResponse = z.infer<typeof ExtractionResponseSchema>;
 
 export const GlossaryItemSchema = z.object({
   code: z.string().min(1),
-  item_type: z.enum(['material', 'assembly', 'construction', 'location', 'color']),
+  item_type: z.enum(['material', 'assembly', 'construction', 'location', 'color', 'equipment', 'system']),
   description: z.string().nullable().optional(),
 });
 
@@ -43,6 +49,8 @@ export type GlossaryMap = Map<string, GlossaryItem>;
 
 // ── Product fact item (изделие/сборная единица) ──
 
+export type ProductKind = 'product' | 'equipment' | 'assembly';
+
 export interface ProductFactItem {
   assembly_mark: string;
   assembly_name: string | null;
@@ -53,6 +61,10 @@ export interface ProductFactItem {
   note: string | null;
   source_snippet: string | null;
   confidence: number;
+  kind?: ProductKind;
+  qty_scope?: QtyScope | null;
+  needs_review?: boolean;
+  extra_params?: string | null;
 }
 
 export type TableCategory =

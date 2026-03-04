@@ -9,6 +9,8 @@ import {
   llmExtractImageBlock,
   llmExtractGlossary,
   mergeResults,
+  enrichMaterialFacts,
+  detectQtyScope,
   FALLBACK_PROMPT_UNIVERSAL,
   FALLBACK_PROMPT_LAYER_CAKE,
   FALLBACK_PROMPT_GLOSSARY,
@@ -341,7 +343,7 @@ export function useExtraction(docId: string) {
         const ruleItems = ruleBasedExtract(bfe.block);
         logger.logRuleBasedExtraction(bfe.block.uid, 'Фаза 1', ruleItems);
         if (ruleItems.length > 0) {
-          await saveFactsToDb(docId, bfe.blockDbId, ruleItems, 'vedomost_materialov', 'Таблица');
+          await saveFactsToDb(docId, bfe.blockDbId, ruleItems, 'vedomost_materialov', 'Таблица', bfe.sectionContext, glossaryMap);
           totalFacts += ruleItems.length;
           phase1RuleFacts += ruleItems.length;
         } else {
@@ -371,7 +373,8 @@ export function useExtraction(docId: string) {
         for (const [blockDbId, items] of llmVedomost) {
           const filtered = filterLlmItemsWithLog(items, blockDbId, 'Фаза 1', logger);
           if (filtered.length > 0) {
-            await saveFactsToDb(docId, blockDbId, filtered, 'vedomost_materialov', 'Таблица');
+            const bfe = vedomostNeedingLlm.find(b => b.blockDbId === blockDbId);
+            await saveFactsToDb(docId, blockDbId, filtered, 'vedomost_materialov', 'Таблица', bfe?.sectionContext, glossaryMap);
             totalFacts += filtered.length;
             phase1LlmFacts += filtered.length;
           }
@@ -410,7 +413,7 @@ export function useExtraction(docId: string) {
 
           if (ruleItems.length > 0) {
             specRuleResults.set(bfe.blockDbId, ruleItems);
-            await saveFactsToDb(docId, bfe.blockDbId, ruleItems, 'spetsifikatsiya', bfe.blockTypeDisplay ?? 'Таблица');
+            await saveFactsToDb(docId, bfe.blockDbId, ruleItems, 'spetsifikatsiya', bfe.blockTypeDisplay ?? 'Таблица', bfe.sectionContext, glossaryMap);
             totalFacts += ruleItems.length;
             phase2RuleFacts += ruleItems.length;
           }
@@ -453,7 +456,7 @@ export function useExtraction(docId: string) {
           const blockTypeDisplay = bfe?.blockTypeDisplay ?? 'Текст';
 
           if (llmUnique.length > 0) {
-            await saveFactsToDb(docId, blockDbId, llmUnique, 'spetsifikatsiya', blockTypeDisplay);
+            await saveFactsToDb(docId, blockDbId, llmUnique, 'spetsifikatsiya', blockTypeDisplay, bfe?.sectionContext, glossaryMap);
             totalFacts += llmUnique.length;
             phase2LlmFacts += llmUnique.length;
           }
@@ -492,12 +495,12 @@ export function useExtraction(docId: string) {
           }
 
           if (allMaterials.length > 0) {
-            await saveFactsToDb(docId, bfe.blockDbId, allMaterials, 'assembly_spec', 'Таблица');
+            await saveFactsToDb(docId, bfe.blockDbId, allMaterials, 'assembly_spec', 'Таблица', bfe.sectionContext, glossaryMap);
             totalFacts += allMaterials.length;
             phase2bMaterials += allMaterials.length;
           }
           if (allProducts.length > 0) {
-            await saveProductsToDb(docId, bfe.blockDbId, allProducts, 'assembly_spec');
+            await saveProductsToDb(docId, bfe.blockDbId, allProducts, 'assembly_spec', bfe.sectionContext);
             phase2bProducts += allProducts.length;
           }
         }
@@ -547,7 +550,8 @@ export function useExtraction(docId: string) {
             }));
 
           if (products.length > 0) {
-            await saveProductsToDb(docId, blockDbId, products, 'vedomost_izdelij');
+            const bfe = productListBlocks.find(b => b.blockDbId === blockDbId);
+            await saveProductsToDb(docId, blockDbId, products, 'vedomost_izdelij', bfe?.sectionContext);
             phase2cProducts += products.length;
           }
         }
@@ -559,6 +563,101 @@ export function useExtraction(docId: string) {
           llmFacts: phase2cProducts,
         });
         logger.addProductFacts(phase2cProducts);
+      }
+
+      // ════════════════════════════════════════════════════════
+      // ДВИЖОК УМНОЖЕНИЯ: assembly_spec × vedomost_izdelij
+      // ════════════════════════════════════════════════════════
+      if (assemblyBlocks.length > 0 && productListBlocks.length > 0) {
+        setProgress(p => ({
+          ...p, status: 'merging', phase: 'Умножение: состав изделий × ведомость',
+        }));
+
+        // Загрузить сохранённые product_facts (ведомость изделий → количество по маркам)
+        const { data: savedProducts } = await supabase
+          .from('product_facts')
+          .select('assembly_mark, quantity, qty_scope')
+          .eq('doc_id', docId)
+          .eq('source_section', 'vedomost_izdelij');
+
+        // Загрузить material_facts из assembly_spec (компоненты "на 1 изделие")
+        const { data: assemblyMaterials } = await supabase
+          .from('material_facts')
+          .select('id, construction, raw_name, canonical_name, canonical_key, quantity, unit, mark, gost, description, note, source_snippet, confidence, qty_scope')
+          .eq('doc_id', docId)
+          .eq('source_section', 'assembly_spec');
+
+        if (savedProducts && savedProducts.length > 0 && assemblyMaterials && assemblyMaterials.length > 0) {
+          // Сформировать map марка → общее кол-во изделий
+          const productQtyMap = new Map<string, number>();
+          for (const p of savedProducts) {
+            if (p.quantity != null && p.quantity > 0) {
+              const existing = productQtyMap.get(p.assembly_mark) ?? 0;
+              productQtyMap.set(p.assembly_mark, existing + p.quantity);
+            }
+          }
+
+          const derivedRows: Array<Record<string, unknown>> = [];
+
+          for (const mat of assemblyMaterials) {
+            const mark = mat.construction;
+            if (!mark || !productQtyMap.has(mark)) continue;
+            if (mat.quantity == null) continue;
+
+            const productQty = productQtyMap.get(mark)!;
+
+            // Определяем scope материала
+            const matScope = mat.qty_scope as string | null;
+
+            if (matScope === 'per_unit') {
+              // Точно "на 1 изделие" — умножаем
+              derivedRows.push({
+                doc_id: docId,
+                block_id: null,
+                raw_name: mat.raw_name,
+                canonical_name: mat.canonical_name,
+                canonical_key: mat.canonical_key,
+                construction: mark,
+                quantity: mat.quantity * productQty,
+                unit: mat.unit,
+                mark: mat.mark,
+                gost: mat.gost,
+                description: mat.description,
+                note: mat.note,
+                source_snippet: mat.source_snippet,
+                source_section: 'assembly_total',
+                block_type_display: 'Расчёт',
+                table_category: 'assembly_total',
+                confidence: Math.min(mat.confidence, 0.85),
+                user_verified: false,
+                kind: 'material',
+                qty_scope: 'total',
+                needs_review: false,
+                derived_from_fact_id: mat.id,
+                multiplier: productQty,
+                calc_note: `${mark} × ${productQty} шт: ${mat.quantity} × ${productQty} = ${mat.quantity * productQty}`,
+              });
+            } else if (matScope === 'total') {
+              // Уже "на все" — не умножаем, пропускаем
+            } else {
+              // scope неизвестен — НЕ умножаем, помечаем needs_review на исходном факте
+              await supabase
+                .from('material_facts')
+                .update({ needs_review: true, qty_scope: 'unknown' })
+                .eq('id', mat.id);
+            }
+          }
+
+          if (derivedRows.length > 0) {
+            const { error: derivedErr } = await supabase.from('material_facts').insert(derivedRows);
+            if (derivedErr) {
+              console.error('Failed to save derived facts:', derivedErr);
+            } else {
+              totalFacts += derivedRows.length;
+              logger.addMaterialFacts(derivedRows.length);
+            }
+          }
+        }
       }
 
       // ════════════════════════════════════════════════════════
@@ -580,7 +679,7 @@ export function useExtraction(docId: string) {
         const filtered = items.filter(item => item.source_snippet);
 
         if (filtered.length > 0) {
-          await saveFactsToDb(docId, bfe.blockDbId, filtered, 'pirog', 'Изображение');
+          await saveFactsToDb(docId, bfe.blockDbId, filtered, 'pirog', 'Изображение', bfe.sectionContext, glossaryMap);
           totalFacts += filtered.length;
           phase3Facts += filtered.length;
         }
@@ -658,14 +757,29 @@ function buildPromptWithGlossary(systemPrompt: string, glossaryMap: GlossaryMap)
   if (glossaryMap.size === 0) return systemPrompt;
 
   const assemblyEntries = [...glossaryMap.values()].filter(e => e.item_type === 'assembly');
-  if (assemblyEntries.length === 0) return systemPrompt;
+  const equipmentEntries = [...glossaryMap.values()].filter(e => e.item_type === 'equipment');
 
-  const glossaryContext = assemblyEntries
-    .slice(0, 40)
-    .map(e => `- ${e.code}: assembly — "${e.description || 'сборная единица'}" → NOT a material, NOT a component`)
-    .join('\n');
+  if (assemblyEntries.length === 0 && equipmentEntries.length === 0) return systemPrompt;
 
-  return `${systemPrompt}\n\nDOCUMENT GLOSSARY (assemblies identified in this document — do NOT extract as materials):\n${glossaryContext}`;
+  const parts: string[] = [];
+
+  if (assemblyEntries.length > 0) {
+    const assemblyContext = assemblyEntries
+      .slice(0, 40)
+      .map(e => `- ${e.code}: assembly — "${e.description || 'сборная единица'}" → NOT a material, NOT a component`)
+      .join('\n');
+    parts.push(`ASSEMBLIES (do NOT extract as materials):\n${assemblyContext}`);
+  }
+
+  if (equipmentEntries.length > 0) {
+    const equipmentContext = equipmentEntries
+      .slice(0, 20)
+      .map(e => `- ${e.code}: equipment — "${e.description || 'оборудование'}" → classify as EQUIPMENT, not material`)
+      .join('\n');
+    parts.push(`EQUIPMENT (classify separately from materials):\n${equipmentContext}`);
+  }
+
+  return `${systemPrompt}\n\nDOCUMENT GLOSSARY:\n${parts.join('\n\n')}`;
 }
 
 function filterLlmItems(items: MaterialFactItem[]): MaterialFactItem[] {
@@ -708,10 +822,14 @@ async function saveFactsToDb(
   items: MaterialFactItem[],
   sourceSection: string,
   blockTypeDisplay: string,
+  sectionContext?: string | null,
+  glossaryMap?: GlossaryMap,
 ): Promise<void> {
   if (items.length === 0) return;
 
-  const rows = items.map(item => ({
+  const enriched = enrichMaterialFacts(items, sectionContext ?? null, glossaryMap);
+
+  const rows = enriched.map(item => ({
     doc_id: docId,
     block_id: blockDbId,
     raw_name: item.raw_name,
@@ -731,6 +849,9 @@ async function saveFactsToDb(
     table_category: sourceSection,
     confidence: item.confidence,
     user_verified: false,
+    kind: item.kind ?? 'material',
+    qty_scope: item.qty_scope ?? null,
+    needs_review: item.needs_review ?? false,
   }));
 
   const { error } = await supabase.from('material_facts').insert(rows);
@@ -745,8 +866,11 @@ async function saveProductsToDb(
   blockDbId: string,
   products: ProductFactItem[],
   sourceSection: string,
+  sectionContext?: string | null,
 ): Promise<void> {
   if (products.length === 0) return;
+
+  const qtyScope = detectQtyScope(sectionContext ?? null);
 
   const rows = products.map(p => ({
     doc_id: docId,
@@ -762,6 +886,10 @@ async function saveProductsToDb(
     source_snippet: p.source_snippet,
     confidence: p.confidence,
     user_verified: false,
+    kind: p.kind ?? 'product',
+    qty_scope: p.qty_scope ?? qtyScope ?? null,
+    needs_review: p.needs_review ?? (p.confidence < 0.5),
+    extra_params: p.extra_params ?? null,
   }));
 
   const { error } = await supabase.from('product_facts').insert(rows);

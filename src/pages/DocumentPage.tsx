@@ -191,11 +191,19 @@ function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[]
 }
 
 // ── MaterialsTab ──
+
+const KIND_LABEL: Record<string, string> = { material: 'Материал', equipment: 'Оборудование' };
+const KIND_COLOR: Record<string, string> = { material: 'blue', equipment: 'volcano' };
+const SCOPE_LABEL: Record<string, string> = { per_unit: 'На 1 изд.', total: 'Итого', unknown: '?' };
+const SCOPE_COLOR: Record<string, string> = { per_unit: 'orange', total: 'green', unknown: 'default' };
+
 function MaterialsTab({ docId }: { docId: string }) {
   const [facts, setFacts] = useState<DbMaterialFact[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [filterKind, setFilterKind] = useState<string | null>(null);
+  const [showReviewOnly, setShowReviewOnly] = useState(false);
   const { message: msg } = App.useApp();
 
   async function loadFacts() {
@@ -249,17 +257,31 @@ function MaterialsTab({ docId }: { docId: string }) {
           );
         }
         return (
-          <Text style={{ cursor: 'pointer' }} onClick={() => { setEditingKey(record.id); setEditValue(val || record.raw_name); }} title="Нажмите для редактирования">
-            {val || <Text type="secondary" italic>—</Text>}
-          </Text>
+          <Space size={4}>
+            {record.needs_review && <WarningOutlined style={{ color: '#faad14' }} title="Требует проверки" />}
+            <Text style={{ cursor: 'pointer' }} onClick={() => { setEditingKey(record.id); setEditValue(val || record.raw_name); }} title="Нажмите для редактирования">
+              {val || <Text type="secondary" italic>—</Text>}
+            </Text>
+          </Space>
         );
       },
     },
     { title: 'Доп. пар.', dataIndex: 'extra_params', key: 'extra_params', width: 110, render: (v: string | null) => v ?? '—' },
     { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 55 },
-    { title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 75, render: (v: number | null) => v ?? '—' },
+    {
+      title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 90,
+      render: (v: number | null, r: DbMaterialFact) => {
+        if (v == null) return '—';
+        const scopeTag = r.qty_scope ? <Tag color={SCOPE_COLOR[r.qty_scope]} style={{ fontSize: 10, marginLeft: 2 }}>{SCOPE_LABEL[r.qty_scope]}</Tag> : null;
+        return <span>{v}{scopeTag}</span>;
+      },
+    },
     { title: 'Марка / ГОСТ', key: 'mark_gost', width: 130, render: (_: unknown, r: DbMaterialFact) => [r.mark, r.gost].filter(Boolean).join(' / ') || '—' },
-    { title: 'Блок', dataIndex: 'block_id', key: 'block_id', width: 85, render: (v: string) => <BlockLink blockId={v} /> },
+    {
+      title: 'Тип', dataIndex: 'kind', key: 'kind', width: 90,
+      render: (v: string) => <Tag color={KIND_COLOR[v] ?? 'default'}>{KIND_LABEL[v] ?? v}</Tag>,
+    },
+    { title: 'Блок', dataIndex: 'block_id', key: 'block_id', width: 85, render: (v: string) => v ? <BlockLink blockId={v} /> : '—' },
     { title: 'Примечание', dataIndex: 'note', key: 'note', width: 140, render: (v: string | null) => v ?? '—' },
     {
       title: 'Увер.', dataIndex: 'confidence', key: 'confidence', width: 70,
@@ -270,16 +292,27 @@ function MaterialsTab({ docId }: { docId: string }) {
   if (loading) return <Spin />;
   if (facts.length === 0) return <Empty description="Материалы ещё не извлечены. Нажмите «Собрать ведомость»." />;
 
-  const vedomostFacts = facts.filter(f => f.source_section === 'vedomost_materialov');
-  const specFacts = facts.filter(f => f.source_section === 'spetsifikatsiya' || f.source_section === 'assembly_spec');
-  const pirogFacts = facts.filter(f => f.source_section === 'pirog');
-  const otherFacts = facts.filter(f => !f.source_section);
+  // Подсчёт статистики
+  const reviewCount = facts.filter(f => f.needs_review).length;
+  const equipmentCount = facts.filter(f => f.kind === 'equipment').length;
+  const derivedCount = facts.filter(f => f.source_section === 'assembly_total').length;
+
+  // Фильтрация
+  let filteredFacts = facts;
+  if (filterKind) filteredFacts = filteredFacts.filter(f => f.kind === filterKind);
+  if (showReviewOnly) filteredFacts = filteredFacts.filter(f => f.needs_review);
+
+  const vedomostFacts = filteredFacts.filter(f => f.source_section === 'vedomost_materialov');
+  const specFacts = filteredFacts.filter(f => f.source_section === 'spetsifikatsiya' || f.source_section === 'assembly_spec');
+  const derivedFacts = filteredFacts.filter(f => f.source_section === 'assembly_total');
+  const pirogFacts = filteredFacts.filter(f => f.source_section === 'pirog');
+  const otherFacts = filteredFacts.filter(f => !f.source_section || !['vedomost_materialov', 'spetsifikatsiya', 'assembly_spec', 'assembly_total', 'pirog'].includes(f.source_section));
 
   function renderSection(title: string, sectionFacts: DbMaterialFact[]) {
     if (sectionFacts.length === 0) return null;
     const groups = new Map<string, DbMaterialFact[]>();
     for (const f of sectionFacts) {
-      const key = f.block_id;
+      const key = f.block_id ?? 'derived';
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(f);
     }
@@ -288,19 +321,21 @@ function MaterialsTab({ docId }: { docId: string }) {
         <Title level={5} style={{ marginBottom: 4 }}>{title} <Tag>{sectionFacts.length} поз.</Tag></Title>
         {[...groups.entries()].map(([blockId, groupFacts], idx) => {
           const firstFact = groupFacts[0];
-          const headerLabel = firstFact?.construction
-            ? firstFact.construction
-            : <Text type="secondary" code style={{ fontSize: 11 }}>{blockId.slice(0, 12)}…</Text>;
+          const headerLabel = firstFact?.calc_note
+            ? <Text type="secondary" style={{ fontSize: 11 }}>Расчёт</Text>
+            : firstFact?.construction
+              ? firstFact.construction
+              : <Text type="secondary" code style={{ fontSize: 11 }}>{blockId.slice(0, 12)}…</Text>;
           return (
             <div key={blockId}>
               <Divider style={{ margin: '6px 0 4px', fontSize: 12, color: '#8c8c8c' }}>
                 <Space size={4}>
                   {headerLabel}
                   <Tag color="default" style={{ fontSize: 11 }}>{groupFacts.length} поз.</Tag>
-                  <BlockLink blockId={blockId} />
+                  {blockId !== 'derived' && <BlockLink blockId={blockId} />}
                 </Space>
               </Divider>
-              <Table dataSource={groupFacts.map(f => ({ ...f, key: f.id }))} columns={columns} size="small" pagination={false} scroll={{ x: 1100 }} style={{ marginBottom: idx < groups.size - 1 ? 0 : 0 }} />
+              <Table dataSource={groupFacts.map(f => ({ ...f, key: f.id }))} columns={columns} size="small" pagination={false} scroll={{ x: 1200 }} style={{ marginBottom: idx < groups.size - 1 ? 0 : 0 }} />
             </div>
           );
         })}
@@ -310,8 +345,34 @@ function MaterialsTab({ docId }: { docId: string }) {
 
   return (
     <div>
+      <Space style={{ marginBottom: 12 }} wrap>
+        <Select
+          value={filterKind}
+          onChange={setFilterKind}
+          allowClear
+          placeholder="Все типы"
+          style={{ width: 160 }}
+          options={[
+            { value: 'material', label: `Материалы (${facts.filter(f => f.kind === 'material').length})` },
+            { value: 'equipment', label: `Оборудование (${equipmentCount})` },
+          ]}
+        />
+        <Button
+          type={showReviewOnly ? 'primary' : 'default'}
+          danger={showReviewOnly}
+          icon={<WarningOutlined />}
+          onClick={() => setShowReviewOnly(!showReviewOnly)}
+        >
+          Требуют проверки ({reviewCount})
+        </Button>
+        {derivedCount > 0 && (
+          <Tag color="purple">Расчётных: {derivedCount}</Tag>
+        )}
+      </Space>
+
       {renderSection('Ведомости материалов', vedomostFacts)}
       {renderSection('Спецификации', specFacts)}
+      {renderSection('Расчёт (assembly × ведомость)', derivedFacts)}
       {renderSection('Пироги конструкций', pirogFacts)}
       {renderSection('Прочее', otherFacts)}
     </div>
@@ -319,50 +380,78 @@ function MaterialsTab({ docId }: { docId: string }) {
 }
 
 // ── ProductsTab ──
+
+const PRODUCT_KIND_LABEL: Record<string, string> = { product: 'Изделие', equipment: 'Оборудование', assembly: 'Сборка' };
+const PRODUCT_KIND_COLOR: Record<string, string> = { product: 'blue', equipment: 'volcano', assembly: 'purple' };
+
 function ProductsTab({ docId }: { docId: string }) {
   const { products, loading } = useProducts(docId);
   const [filterMark, setFilterMark] = useState<string | null>(null);
+  const [showReviewOnly, setShowReviewOnly] = useState(false);
 
   if (loading) return <Spin />;
   if (products.length === 0) return <Empty description="Изделия не обнаружены." />;
 
+  const reviewCount = (products as DbProductFact[]).filter(p => p.needs_review).length;
+
   const prodColumns = [
     {
       title: 'Марка', dataIndex: 'assembly_mark', key: 'assembly_mark', width: 120,
-      render: (v: string) => (
-        <Text
-          style={{ cursor: 'pointer', color: filterMark === v ? '#1677ff' : undefined }}
-          onClick={() => setFilterMark((prev) => prev === v ? null : v)}
-          title="Фильтр по марке"
-        >
-          {v}
-        </Text>
+      render: (v: string, record: DbProductFact) => (
+        <Space size={4}>
+          {record.needs_review && <WarningOutlined style={{ color: '#faad14' }} title="Требует проверки" />}
+          <Text
+            style={{ cursor: 'pointer', color: filterMark === v ? '#1677ff' : undefined }}
+            onClick={() => setFilterMark((prev) => prev === v ? null : v)}
+            title="Фильтр по марке"
+          >
+            {v}
+          </Text>
+        </Space>
       ),
     },
     { title: 'Наименование', dataIndex: 'assembly_name', key: 'assembly_name', ellipsis: true, render: (v: string | null) => v ?? '—' },
     { title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 80, render: (v: number | null) => v ?? '—' },
     { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 55, render: (v: string | null) => v ?? '—' },
+    {
+      title: 'Тип', dataIndex: 'kind', key: 'kind', width: 100,
+      render: (v: string) => <Tag color={PRODUCT_KIND_COLOR[v] ?? 'default'}>{PRODUCT_KIND_LABEL[v] ?? v}</Tag>,
+    },
+    { title: 'Доп. пар.', dataIndex: 'extra_params', key: 'extra_params', width: 110, render: (v: string | null) => v ?? '—' },
     { title: 'Описание', dataIndex: 'description', key: 'description', ellipsis: true, render: (v: string | null) => v ?? '—' },
-    { title: 'Примечание', dataIndex: 'note', key: 'note', ellipsis: true, render: (v: string | null) => v ?? '—' },
     { title: 'Блок', dataIndex: 'block_id', key: 'block_id', width: 130, render: (v: string | null) => v ? <BlockLink blockId={v} /> : '—' },
   ];
 
-  const filtered = filterMark ? (products as DbProductFact[]).filter(p => p.assembly_mark === filterMark) : products as DbProductFact[];
+  let filtered = filterMark ? (products as DbProductFact[]).filter(p => p.assembly_mark === filterMark) : products as DbProductFact[];
+  if (showReviewOnly) filtered = filtered.filter(p => p.needs_review);
 
   return (
     <div>
-      {filterMark && (
-        <div style={{ marginBottom: 8 }}>
-          <Text type="secondary">Фильтр: </Text>
-          <Tag closable onClose={() => setFilterMark(null)} color="blue">{filterMark}</Tag>
-        </div>
-      )}
+      <Space style={{ marginBottom: 8 }} wrap>
+        {filterMark && (
+          <>
+            <Text type="secondary">Фильтр: </Text>
+            <Tag closable onClose={() => setFilterMark(null)} color="blue">{filterMark}</Tag>
+          </>
+        )}
+        {reviewCount > 0 && (
+          <Button
+            size="small"
+            type={showReviewOnly ? 'primary' : 'default'}
+            danger={showReviewOnly}
+            icon={<WarningOutlined />}
+            onClick={() => setShowReviewOnly(!showReviewOnly)}
+          >
+            Требуют проверки ({reviewCount})
+          </Button>
+        )}
+      </Space>
       <Table
         dataSource={filtered.map(p => ({ ...p, key: p.id }))}
         columns={prodColumns}
         size="small"
         pagination={false}
-        scroll={{ x: 900 }}
+        scroll={{ x: 1000 }}
       />
     </div>
   );

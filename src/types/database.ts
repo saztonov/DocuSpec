@@ -65,6 +65,9 @@ export interface DbDocBlock {
   created_at: string;
 }
 
+export type ItemKind = 'material' | 'equipment';
+export type QtyScope = 'per_unit' | 'total' | 'unknown';
+
 export interface DbMaterialFact {
   id: string;
   doc_id: string;
@@ -86,6 +89,12 @@ export interface DbMaterialFact {
   block_type_display: string | null;
   confidence: number;
   user_verified: boolean;
+  kind: ItemKind;
+  qty_scope: QtyScope | null;
+  needs_review: boolean;
+  derived_from_fact_id: string | null;
+  multiplier: number | null;
+  calc_note: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -138,16 +147,20 @@ export interface DbLlmPrompt {
   updated_at: string;
 }
 
+export type GlossaryItemType = 'material' | 'assembly' | 'construction' | 'location' | 'color' | 'equipment' | 'system';
+
 export interface DbDocGlossary {
   id: string;
   doc_id: string;
   code: string;
-  item_type: 'material' | 'assembly' | 'construction' | 'location' | 'color';
+  item_type: GlossaryItemType;
   description: string | null;
   source_block_id: string | null;
   confidence: number;
   created_at: string;
 }
+
+export type ProductKind = 'product' | 'equipment' | 'assembly';
 
 export interface DbProductFact {
   id: string;
@@ -164,6 +177,10 @@ export interface DbProductFact {
   source_snippet: string | null;
   confidence: number;
   user_verified: boolean;
+  kind: ProductKind;
+  qty_scope: QtyScope | null;
+  needs_review: boolean;
+  extra_params: string | null;
   created_at: string;
   updated_at: string;
 }

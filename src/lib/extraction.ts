@@ -1,5 +1,5 @@
 import type { ParsedTable, ParsedBlock } from '../types/parser.ts';
-import type { MaterialFactItem, GlossaryItem, GlossaryMap, ProductFactItem } from '../types/extraction.ts';
+import type { MaterialFactItem, GlossaryItem, GlossaryMap, ProductFactItem, ItemKind, QtyScope } from '../types/extraction.ts';
 import { ExtractionResponseSchema, GlossaryResponseSchema } from '../types/extraction.ts';
 import { classifyTable, isExtractableCategory } from './tableClassifier.ts';
 import { generateCanonicalKey } from './canonical.ts';
@@ -120,6 +120,14 @@ TYPES:
   * Listed in "Ведомость изделий/ограждений" sections
   * Appears as a group header in spec tables: "ОГ-13, L=4 700"
   * Counted in whole units (шт) or linear meters (м.п.) as a finished product
+- "equipment" — engineering equipment identified by a model/type code:
+  * Has manufacturer model numbers, power ratings, or technical specs
+  * Examples: VTS Volcano VR3, Grundfos UPS 25-60, ABB ACS310
+  * Found in sections ОВ, ВК, ЭОМ, СС (HVAC, plumbing, electrical)
+  * Usually with parameters: kW, V, m³/h, Pa
+- "system" — an engineering system code:
+  * Prefix identifies the system type: П (приточная), В (вытяжная), Т (теплоснабжение), К (кондиционирование)
+  * Examples: П1, В2, Т1.1, К-1, ХС-1, ГВС
 - "construction" — a structural element or location code:
   * Appears in Поз. column of facade/floor/finish specifications
   * Examples: Фпод.п-1, Фр-1, Фст-1, Н4, ОС-1
@@ -136,7 +144,7 @@ RULES:
 5. Return ONLY valid JSON. No text, no markdown, no explanation outside JSON.
 
 Return exactly this format:
-{"glossary": [{"code": "ОГ-13", "item_type": "assembly", "description": "Стальное ограждение"}, {"code": "RAL 9001", "item_type": "color", "description": "Кремово-белый"}]}
+{"glossary": [{"code": "ОГ-13", "item_type": "assembly", "description": "Стальное ограждение"}, {"code": "RAL 9001", "item_type": "color", "description": "Кремово-белый"}, {"code": "П1", "item_type": "system", "description": "Приточная система"}]}
 
 If no codes found: {"glossary": []}`;
 
@@ -776,6 +784,77 @@ export async function llmExtractGlossary(
   }
 
   return allItems;
+}
+
+// ── QtyScope detection ──
+
+const PER_UNIT_PATTERNS = /(?:на\s*1\b|для\s+одного|на\s+один\s+узел|на\s*1[\s-]*(?:изделие|узел|элемент)|количество\s+на\s+1|на\s+единицу)/i;
+const TOTAL_PATTERNS = /(?:\bвсего\b|\bитого\b|сводная\s+ведомость|на\s+объект|на\s+секцию|общий\s+расход|общая\s+потребность|на\s+здание)/i;
+
+/**
+ * Определить область действия количества по контексту (заголовок секции, примечание, текст таблицы).
+ */
+export function detectQtyScope(sectionContext: string | null, noteOrHeader?: string | null): QtyScope | null {
+  const combined = [sectionContext, noteOrHeader].filter(Boolean).join(' ');
+  if (!combined) return null;
+
+  if (PER_UNIT_PATTERNS.test(combined)) return 'per_unit';
+  if (TOTAL_PATTERNS.test(combined)) return 'total';
+  return null;
+}
+
+// ── ItemKind classification ──
+
+const EQUIPMENT_PATTERNS = /(?:установка|агрегат|насос|котёл|котел|вентилятор|кондиционер|компрессор|электродвигатель|привод|клапан\s+(?:регулирующ|запорн)|датчик|контроллер|щит\s+(?:автоматик|управлен|силов)|шкаф\s+(?:управлен|автоматик|электр)|блок\s+управлен|частотн(?:ый|ого)\s+преобразоват|преобразователь\s+частот|трансформатор|генератор|тепловая\s+завеса|фанкойл|чиллер|рекуператор|калорифер|водонагреватель|бойлер|радиатор\s+(?:отоплен|биметалл)|конвектор|полотенцесушитель)/i;
+
+const EQUIPMENT_SUFFIX_PATTERNS = /(?:\b(?:кВт|кВА|Вт|В|А|об\/мин|м³\/ч|л\/с|дБ)\b)|(?:мощност|напряжен|производительност|давлени(?:е|я)\s+\d)/i;
+
+/**
+ * Классифицировать элемент как material или equipment.
+ * Использует glossaryMap (если item_type='equipment') и паттерны в названии.
+ */
+export function classifyItemKind(item: MaterialFactItem, glossaryMap?: GlossaryMap): ItemKind {
+  // Проверка через глоссарий
+  if (glossaryMap) {
+    const markToCheck = item.mark || item.raw_name.split(',')[0].trim();
+    const glossaryEntry = glossaryMap.get(markToCheck);
+    if (glossaryEntry?.item_type === 'equipment') return 'equipment';
+  }
+
+  const combinedText = [item.raw_name, item.description, item.note].filter(Boolean).join(' ');
+
+  if (EQUIPMENT_PATTERNS.test(combinedText)) return 'equipment';
+  if (EQUIPMENT_SUFFIX_PATTERNS.test(combinedText)) return 'equipment';
+
+  return 'material';
+}
+
+/**
+ * Пост-обработка: проставить kind, qty_scope, needs_review на массив MaterialFactItem.
+ */
+export function enrichMaterialFacts(
+  items: MaterialFactItem[],
+  sectionContext: string | null,
+  glossaryMap?: GlossaryMap,
+): MaterialFactItem[] {
+  const qtyScope = detectQtyScope(sectionContext);
+
+  return items.map(item => {
+    const kind = item.kind ?? classifyItemKind(item, glossaryMap);
+    const itemQtyScope = item.qty_scope ?? qtyScope ?? null;
+
+    const needsReview = item.needs_review ??
+      ((item.confidence < 0.5) ||
+      (kind === 'equipment' && item.confidence < 0.8) ||
+      (itemQtyScope === 'unknown'));
+
+    return {
+      ...item,
+      kind,
+      qty_scope: itemQtyScope,
+      needs_review: needsReview,
+    };
+  });
 }
 
 // ── Merge and dedup ──
