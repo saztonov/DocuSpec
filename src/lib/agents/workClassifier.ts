@@ -115,11 +115,8 @@ function buildTools(/* no extra context needed */): AgentTool[] {
       additionalProperties: false,
     },
     execute: async (input: unknown) => {
-      const { query, category } = input as { query: string; category?: string };
-      const results = await searchNorms(query, {
-        workCategory: category,
-        limit: 10,
-      });
+      const { query } = input as { query: string; category?: string };
+      const results = await searchNorms(query, { limit: 10 });
       return results.map((r) => ({
         id: r.id,
         norm_code: r.norm_code,

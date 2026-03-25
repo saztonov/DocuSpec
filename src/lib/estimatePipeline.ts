@@ -371,6 +371,58 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
       await new Promise(r => setTimeout(r, 200));
     }
 
+    // Fallback: если расценок 0, формировать позиции напрямую из work_items + material_facts
+    if (linesCount === 0) {
+      console.log('[estimate] ⚠️ Расценки не найдены — формируем позиции сметы из work_items + material_facts');
+      const { data: allWorkItems } = await supabase
+        .from('estimate_work_items')
+        .select('*')
+        .eq('estimate_id', estimateId)
+        .order('created_at');
+
+      for (const wi of allWorkItems || []) {
+        linesCount++;
+        // Строка работы
+        await supabase.from('estimate_lines').insert({
+          estimate_id: estimateId,
+          sort_order: linesCount,
+          work_item_id: wi.id,
+          line_number: String(linesCount),
+          description: wi.work_description,
+          measure_unit: null,
+          volume: null,
+          volume_calc_note: 'Расценка ГЭСН не подобрана',
+          source_material_fact_ids: wi.source_material_fact_ids || [],
+        });
+
+        // Строки материалов для этой работы
+        const factIds = wi.source_material_fact_ids || [];
+        if (factIds.length > 0) {
+          const { data: facts } = await supabase
+            .from('material_facts')
+            .select('id, canonical_name, raw_name, quantity, unit, confidence')
+            .in('id', factIds);
+
+          let subIdx = 1;
+          for (const fact of facts || []) {
+            linesCount++;
+            await supabase.from('estimate_lines').insert({
+              estimate_id: estimateId,
+              sort_order: linesCount,
+              work_item_id: wi.id,
+              line_number: `${allWorkItems!.indexOf(wi) + 1}.${subIdx}`,
+              description: `  ${fact.canonical_name || fact.raw_name}`,
+              measure_unit: fact.unit,
+              volume: fact.quantity,
+              source_material_fact_ids: [fact.id],
+            });
+            subIdx++;
+          }
+        }
+      }
+      console.log(`[estimate] Fallback: сформировано ${linesCount} позиций из work_items`);
+    }
+
     progress(onProgress, { agentThinking: `Сформировано ${linesCount} позиций сметы` });
 
     // ── Phase F: Validation ──────────────────────────────────────

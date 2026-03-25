@@ -769,7 +769,7 @@ function EstimateTab({ docId, docStatus, model }: { docId: string; docStatus: st
   }
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Space>
         <Button
           type="primary"
@@ -777,6 +777,7 @@ function EstimateTab({ docId, docStatus, model }: { docId: string; docStatus: st
           onClick={handleRun}
           disabled={!canRun}
           loading={isRunning}
+          size="large"
         >
           Составить смету
         </Button>
@@ -788,16 +789,16 @@ function EstimateTab({ docId, docStatus, model }: { docId: string; docStatus: st
       {isRunning && <EstimateProgress progress={progress} />}
 
       {progress.status === 'error' && (
-        <Alert type="error" message="Ошибка" description={progress.agentThinking} showIcon />
+        <Alert type="error" title="Ошибка" description={progress.agentThinking} showIcon />
       )}
 
       {progress.status === 'done' && estimateId && (
         <Alert
           type="success"
-          message="Смета сформирована"
+          title="Смета сформирована"
           action={
             <Button size="small" onClick={() => navigate(`/doc/${docId}/estimate/${estimateId}`)}>
-              Открыть
+              Открыть смету
             </Button>
           }
           showIcon

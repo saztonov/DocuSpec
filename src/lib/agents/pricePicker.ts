@@ -103,7 +103,7 @@ function buildTools(estimateId: string): AgentTool[] {
       };
       const results = await searchNorms(query, {
         baseType: base_type,
-        workCategory: work_category,
+        // workCategory не передаём — поле не заполнено при импорте, ищем по тексту + embedding
         limit: 15,
       });
       return results.map((r) => ({

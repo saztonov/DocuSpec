@@ -17,6 +17,7 @@ import {
   Badge,
   App,
   Empty,
+  Tooltip,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -30,6 +31,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   QuestionCircleOutlined,
+  ExportOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useEstimateData } from '../hooks/useEstimateData.ts';
@@ -810,109 +812,304 @@ function RateMatchesTab({
   );
 }
 
-// ── Вкладка: Смета ──
+// ── Вкладка: Смета (иерархическая) ──
 
-function EstimateLinesTab({ lines }: { lines: DbEstimateLine[] }) {
-  const columns: ColumnsType<DbEstimateLine> = [
+/** Строка иерархической таблицы сметы */
+interface EstimateTreeRow {
+  key: string;
+  lineNumber: string;
+  description: string;
+  measureUnit: string | null;
+  volume: number | null;
+  volumeCalcNote: string | null;
+  justification: string | null;
+  unitCost: number | null;
+  totalCost: number | null;
+  confidence: number | null;
+  needsReview: boolean;
+  isWork: boolean;
+  workCategory: string | null;
+  children?: EstimateTreeRow[];
+}
+
+/** Цвет фона строки сметы по типу и уверенности */
+function estimateRowBg(row: EstimateTreeRow): string | undefined {
+  if (row.needsReview) return '#fff2f0';
+  if (row.confidence != null && row.confidence < 0.6) return '#fffbe6';
+  if (row.isWork) return '#f0f5ff';
+  return undefined;
+}
+
+function EstimateLinesTab({
+  lines,
+  workItems,
+  rateMatches,
+}: {
+  lines: DbEstimateLine[];
+  workItems: DbEstimateWorkItem[];
+  rateMatches: DbEstimateRateMatch[];
+}) {
+  // ---------- построение иерархии ----------
+
+  const treeData = useMemo(() => {
+    const wiMap = new Map(workItems.map((wi) => [wi.id, wi]));
+    const rmMap = new Map(rateMatches.map((rm) => [rm.id, rm]));
+
+    // Определяем, является ли строка «работой» (родитель) или «материалом» (потомок).
+    // Работа: описание без ведущих пробелов и есть work_item_id.
+    // Материал: описание начинается с пробелов ИЛИ нет work_item_id (но есть rate_match_id).
+    const isWorkLine = (line: DbEstimateLine): boolean =>
+      !!line.work_item_id && !line.description.startsWith('  ');
+
+    // Группируем по work_item_id
+    const groups = new Map<string, { work: EstimateTreeRow; children: EstimateTreeRow[] }>();
+    const orphans: EstimateTreeRow[] = [];
+
+    // Сортируем по sort_order
+    const sorted = [...lines].sort((a, b) => a.sort_order - b.sort_order);
+
+    // Индекс для работ, чтобы назначить номер если line_number пуст
+    let workIndex = 0;
+
+    for (const line of sorted) {
+      const wi = line.work_item_id ? wiMap.get(line.work_item_id) : undefined;
+      const rm = line.rate_match_id ? rmMap.get(line.rate_match_id) : undefined;
+
+      // Определяем уверенность: из work_item для работ, из rate_match для материалов
+      const confidence = isWorkLine(line)
+        ? (wi?.confidence ?? null)
+        : (rm?.match_confidence ?? null);
+
+      const needsReview = isWorkLine(line)
+        ? (wi?.needs_review ?? false)
+        : (rm?.needs_review ?? false);
+
+      const row: EstimateTreeRow = {
+        key: line.id,
+        lineNumber: line.line_number ?? '',
+        description: line.description.replace(/^\s+/, ''),
+        measureUnit: line.measure_unit,
+        volume: line.volume,
+        volumeCalcNote: line.volume_calc_note,
+        justification: line.justification,
+        unitCost: line.unit_cost,
+        totalCost: line.total_cost,
+        confidence,
+        needsReview,
+        isWork: isWorkLine(line),
+        workCategory: isWorkLine(line) ? (wi?.work_category ?? null) : null,
+      };
+
+      if (isWorkLine(line) && line.work_item_id) {
+        workIndex++;
+        if (!row.lineNumber) row.lineNumber = String(workIndex);
+        if (!groups.has(line.work_item_id)) {
+          groups.set(line.work_item_id, { work: row, children: [] });
+        } else {
+          // Уже есть дети, подставляем работу
+          groups.get(line.work_item_id)!.work = row;
+        }
+      } else if (line.work_item_id && groups.has(line.work_item_id)) {
+        groups.get(line.work_item_id)!.children.push(row);
+      } else if (line.work_item_id && !groups.has(line.work_item_id)) {
+        // Материал пришёл раньше работы — создаём placeholder
+        const placeholderWork: EstimateTreeRow = {
+          key: `placeholder-${line.work_item_id}`,
+          lineNumber: '',
+          description: wi?.work_description ?? '(вид работы)',
+          measureUnit: null,
+          volume: null,
+          volumeCalcNote: null,
+          justification: null,
+          unitCost: null,
+          totalCost: null,
+          confidence: wi?.confidence ?? null,
+          needsReview: wi?.needs_review ?? false,
+          isWork: true,
+          workCategory: wi?.work_category ?? null,
+        };
+        groups.set(line.work_item_id, { work: placeholderWork, children: [row] });
+      } else {
+        orphans.push(row);
+      }
+    }
+
+    // Собираем итоговый массив
+    const result: EstimateTreeRow[] = [];
+    // Сохраняем порядок из sorted: берём первый встретившийся work_item_id
+    const addedGroups = new Set<string>();
+    for (const line of sorted) {
+      if (line.work_item_id && groups.has(line.work_item_id) && !addedGroups.has(line.work_item_id)) {
+        addedGroups.add(line.work_item_id);
+        const g = groups.get(line.work_item_id)!;
+        const workRow = { ...g.work };
+        if (g.children.length > 0) {
+          workRow.children = g.children;
+        }
+        result.push(workRow);
+      }
+    }
+    result.push(...orphans);
+
+    return result;
+  }, [lines, workItems, rateMatches]);
+
+  // ---------- колонки ----------
+
+  const columns: ColumnsType<EstimateTreeRow> = [
     {
-      title: '## п/п',
-      dataIndex: 'line_number',
-      key: 'line_number',
+      title: '\u2116',
+      dataIndex: 'lineNumber',
+      key: 'lineNumber',
       width: 70,
-      render: (v: string | null) => v ?? '--',
-    },
-    {
-      title: 'Обоснование',
-      dataIndex: 'justification',
-      key: 'justification',
-      width: 180,
-      render: (v: string | null) =>
-        v ? <Text code>{v}</Text> : <Text type="secondary">--</Text>,
+      render: (v: string, record: EstimateTreeRow) => (
+        <Text strong={record.isWork}>{v || '--'}</Text>
+      ),
     },
     {
       title: 'Наименование',
       dataIndex: 'description',
       key: 'description',
+      render: (v: string, record: EstimateTreeRow) =>
+        record.isWork ? (
+          <Text strong>{v}</Text>
+        ) : (
+          <Text style={{ paddingLeft: 8 }}>{v}</Text>
+        ),
     },
     {
       title: 'Ед. изм.',
-      dataIndex: 'measure_unit',
-      key: 'measure_unit',
+      dataIndex: 'measureUnit',
+      key: 'measureUnit',
       width: 80,
       render: (v: string | null) => v ?? '--',
     },
     {
-      title: 'Объём',
+      title: 'Кол-во',
       dataIndex: 'volume',
       key: 'volume',
       width: 100,
-      render: (v: number | null) =>
-        v != null ? <Text strong>{v}</Text> : '--',
+      render: (v: number | null, record: EstimateTreeRow) => {
+        if (v == null) return '--';
+        const node = <Text strong>{v}</Text>;
+        return record.volumeCalcNote ? (
+          <Tooltip title={record.volumeCalcNote}>{node}</Tooltip>
+        ) : (
+          node
+        );
+      },
     },
     {
-      title: 'Расчёт объёма',
-      dataIndex: 'volume_calc_note',
-      key: 'volume_calc_note',
-      width: 250,
+      title: 'Код ГЭСН',
+      dataIndex: 'justification',
+      key: 'justification',
+      width: 160,
       render: (v: string | null) =>
-        v ? (
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {v}
-          </Text>
-        ) : (
-          '--'
-        ),
+        v ? <Text code style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">--</Text>,
     },
     {
-      title: 'Ст-ть ед.',
-      dataIndex: 'unit_cost',
-      key: 'unit_cost',
+      title: 'Уверенность',
+      dataIndex: 'confidence',
+      key: 'confidence',
+      width: 110,
+      sorter: (a: EstimateTreeRow, b: EstimateTreeRow) =>
+        (a.confidence ?? 0) - (b.confidence ?? 0),
+      render: (v: number | null) => {
+        if (v == null) return <Text type="secondary">--</Text>;
+        const pct = Math.round(v * 100);
+        const color = pct >= 80 ? 'green' : pct >= 50 ? 'orange' : 'red';
+        return <Tag color={color}>{pct}%</Tag>;
+      },
+    },
+    {
+      title: 'Статус',
+      key: 'status',
       width: 100,
-      render: (v: number | null) => (v != null ? v.toFixed(2) : '--'),
-    },
-    {
-      title: 'Всего',
-      dataIndex: 'total_cost',
-      key: 'total_cost',
-      width: 120,
-      render: (v: number | null) =>
-        v != null ? (
-          <Text strong>{v.toFixed(2)}</Text>
-        ) : (
-          '--'
-        ),
+      filters: [
+        { text: 'Требует проверки', value: 'review' },
+        { text: 'OK', value: 'ok' },
+      ],
+      onFilter: (value, record) =>
+        value === 'review' ? record.needsReview : !record.needsReview,
+      render: (_: unknown, record: EstimateTreeRow) => {
+        if (record.needsReview) {
+          return (
+            <Tag color="warning" icon={<WarningOutlined />}>
+              Проверка
+            </Tag>
+          );
+        }
+        if (record.isWork && record.workCategory) {
+          return <Tag color="blue">{record.workCategory}</Tag>;
+        }
+        return null;
+      },
     },
   ];
+
+  // ---------- рендер ----------
 
   if (lines.length === 0) {
     return <Empty description="Позиции сметы ещё не сформированы" />;
   }
 
   return (
-    <Table
-      dataSource={lines.map((l) => ({ ...l, key: l.id }))}
-      columns={columns}
-      size="small"
-      pagination={{ defaultPageSize: 30 }}
-      scroll={{ x: 1100 }}
-      summary={(pageData) => {
-        const totalCost = pageData.reduce(
-          (sum, row) => sum + (row.total_cost ?? 0),
-          0,
-        );
-        if (totalCost === 0) return null;
-        return (
-          <Table.Summary.Row>
-            <Table.Summary.Cell index={0} colSpan={7} align="right">
-              <Text strong>Итого по странице:</Text>
-            </Table.Summary.Cell>
-            <Table.Summary.Cell index={7}>
-              <Text strong>{totalCost.toFixed(2)}</Text>
-            </Table.Summary.Cell>
-          </Table.Summary.Row>
-        );
-      }}
-    />
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {/* Панель действий */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <Tooltip title="Экспорт сметы (в разработке)">
+          <Button icon={<ExportOutlined />} disabled>
+            Экспорт
+          </Button>
+        </Tooltip>
+      </div>
+
+      <Table<EstimateTreeRow>
+        dataSource={treeData}
+        columns={columns}
+        size="small"
+        pagination={false}
+        scroll={{ x: 900 }}
+        defaultExpandAllRows
+        indentSize={24}
+        rowKey="key"
+        onRow={(record) => ({
+          style: {
+            backgroundColor: estimateRowBg(record),
+          },
+        })}
+        summary={() => {
+          // Считаем итого только по верхним (работам) чтобы не дублировать
+          const totalCost = treeData.reduce(
+            (sum, row) => {
+              if (row.totalCost != null) return sum + row.totalCost;
+              // Если у работы нет total_cost, суммируем по детям
+              if (row.children) {
+                return sum + row.children.reduce((s, c) => s + (c.totalCost ?? 0), 0);
+              }
+              return sum;
+            },
+            0,
+          );
+          if (totalCost === 0) return null;
+          return (
+            <Table.Summary fixed>
+              <Table.Summary.Row
+                style={{ backgroundColor: '#fafafa' }}
+              >
+                <Table.Summary.Cell index={0} colSpan={3} align="right">
+                  <Text strong>Итого:</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={3}>
+                  <Text strong>{totalCost.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={4} colSpan={3} />
+              </Table.Summary.Row>
+            </Table.Summary>
+          );
+        }}
+      />
+    </Space>
   );
 }
 
@@ -1086,7 +1283,13 @@ export default function EstimatePage() {
           <FileTextOutlined /> Смета
         </span>
       ),
-      children: <EstimateLinesTab lines={lines} />,
+      children: (
+        <EstimateLinesTab
+          lines={lines}
+          workItems={workItems}
+          rateMatches={rateMatches}
+        />
+      ),
     },
     {
       key: 'review',
