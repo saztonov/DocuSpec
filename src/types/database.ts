@@ -95,6 +95,8 @@ export interface DbMaterialFact {
   derived_from_fact_id: string | null;
   multiplier: number | null;
   calc_note: string | null;
+  fact_type: FactType;
+  quantity_type: QuantityType | null;
   created_at: string;
   updated_at: string;
 }
@@ -160,6 +162,19 @@ export interface DbDocGlossary {
   created_at: string;
 }
 
+export type FactType = 'observed' | 'derived' | 'inferred' | 'layer';
+export type QuantityType =
+  | 'assembly_total'
+  | 'component_per_assembly'
+  | 'route_length'
+  | 'layer_thickness'
+  | 'area'
+  | 'volume'
+  | 'count'
+  | 'equipment_count'
+  | 'weight'
+  | 'linear';
+
 export type ProductKind = 'product' | 'equipment' | 'assembly';
 
 export interface DbProductFact {
@@ -183,4 +198,39 @@ export interface DbProductFact {
   extra_params: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export type WorkHintType =
+  | 'coating'
+  | 'waterproofing'
+  | 'fire_protection'
+  | 'mounting'
+  | 'preparation'
+  | 'insulation'
+  | 'reinforcement'
+  | 'other';
+
+export interface DbWorkHint {
+  id: string;
+  doc_id: string;
+  block_id: string | null;
+  hint_text: string;
+  hint_type: WorkHintType | null;
+  related_materials: string[] | null;
+  confidence: number;
+  created_at: string;
+}
+
+export type DependencyType = 'material' | 'geometry' | 'volume' | 'detail' | 'drawing';
+
+export interface DbDependencyFlag {
+  id: string;
+  doc_id: string;
+  block_id: string | null;
+  referenced_doc_code: string;
+  referenced_sheet: string | null;
+  dependency_type: DependencyType | null;
+  description: string | null;
+  resolved: boolean;
+  created_at: string;
 }

@@ -26,6 +26,7 @@ import {
   ReloadOutlined,
   SaveOutlined,
   DownloadOutlined,
+  CalculatorOutlined,
 } from '@ant-design/icons';
 import { supabase } from '../lib/supabase.ts';
 import { useBom } from '../hooks/useBom.ts';
@@ -36,6 +37,9 @@ import { getAvailableModels } from '../lib/models.ts';
 import BlockTableModal from '../components/BlockTableModal.tsx';
 import BlockLink from '../components/BlockLink.tsx';
 import type { DbDocument, DbDocPage, DbDocBlock, DbMaterialFact, DbBomSummary, DbProductFact } from '../types/database.ts';
+import { useEstimate } from '../hooks/useEstimate.ts';
+import { useEstimatesList } from '../hooks/useEstimateData.ts';
+import EstimateProgress from '../components/estimate/EstimateProgress.tsx';
 
 const { Title, Text } = Typography;
 
@@ -745,6 +749,110 @@ function ExtractionProgress({ docId, onComplete, selectedModel, onModelChange }:
 }
 
 // ── Main DocumentPage ──
+function EstimateTab({ docId, docStatus, model }: { docId: string; docStatus: string; model: string }) {
+  const { progress, estimateId, runEstimate } = useEstimate(docId);
+  const { estimates, loading: listLoading, refetch } = useEstimatesList(docId);
+  const navigate = useNavigate();
+  const { message } = App.useApp();
+
+  const canRun = docStatus === 'done' && progress.status === 'idle';
+  const isRunning = progress.status !== 'idle' && progress.status !== 'done' && progress.status !== 'error';
+
+  async function handleRun() {
+    try {
+      await runEstimate(model);
+      message.success('Смета сформирована');
+      refetch();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Ошибка');
+    }
+  }
+
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space>
+        <Button
+          type="primary"
+          icon={<CalculatorOutlined />}
+          onClick={handleRun}
+          disabled={!canRun}
+          loading={isRunning}
+        >
+          Составить смету
+        </Button>
+        {docStatus !== 'done' && (
+          <Tag color="orange">Сначала извлеките материалы</Tag>
+        )}
+      </Space>
+
+      {isRunning && <EstimateProgress progress={progress} />}
+
+      {progress.status === 'error' && (
+        <Alert type="error" message="Ошибка" description={progress.agentThinking} showIcon />
+      )}
+
+      {progress.status === 'done' && estimateId && (
+        <Alert
+          type="success"
+          message="Смета сформирована"
+          action={
+            <Button size="small" onClick={() => navigate(`/doc/${docId}/estimate/${estimateId}`)}>
+              Открыть
+            </Button>
+          }
+          showIcon
+        />
+      )}
+
+      {estimates.length > 0 && (
+        <>
+          <Divider orientation="left">Существующие сметы</Divider>
+          <Table
+            size="small"
+            dataSource={estimates}
+            rowKey="id"
+            loading={listLoading}
+            pagination={false}
+            columns={[
+              { title: '№', key: 'n', width: 50, render: (_: unknown, __: unknown, i: number) => i + 1 },
+              { title: 'Название', dataIndex: 'name', key: 'name' },
+              {
+                title: 'Статус',
+                dataIndex: 'status',
+                key: 'status',
+                width: 120,
+                render: (s: string) => (
+                  <Tag color={s === 'done' ? 'green' : s === 'error' ? 'red' : 'processing'}>
+                    {s}
+                  </Tag>
+                ),
+              },
+              { title: 'Модель', dataIndex: 'model_used', key: 'model', width: 150 },
+              {
+                title: 'Дата',
+                dataIndex: 'created_at',
+                key: 'date',
+                width: 160,
+                render: (v: string) => new Date(v).toLocaleString('ru'),
+              },
+              {
+                title: '',
+                key: 'actions',
+                width: 100,
+                render: (_: unknown, record: { id: string }) => (
+                  <Button size="small" onClick={() => navigate(`/doc/${docId}/estimate/${record.id}`)}>
+                    Открыть
+                  </Button>
+                ),
+              },
+            ]}
+          />
+        </>
+      )}
+    </Space>
+  );
+}
+
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
   const [document, setDocument] = useState<DbDocument | null>(null);
@@ -841,6 +949,15 @@ export default function DocumentPage() {
         </span>
       ),
       children: <BomView docId={document.id} filename={document.filename} modelUsed={selectedModel} projectId={document.project_id} sectionId={document.section_id} />,
+    },
+    {
+      key: 'estimate',
+      label: (
+        <span>
+          <CalculatorOutlined /> Смета
+        </span>
+      ),
+      children: <EstimateTab docId={document.id} docStatus={document.status} model={selectedModel} />,
     },
   ];
 

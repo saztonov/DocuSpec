@@ -9,7 +9,8 @@
       "Bash(ls \"C:/Users/Usr/claudeprojects/DocuSpec/node_modules/@rc-component/upload/lib/interface\"*)",
       "Bash(npx vite build)",
       "Bash(npm run build)",
-      "Bash(npx tsc --noEmit)"
+      "Bash(npx tsc --noEmit)",
+      "Bash(head -c 3000 \"C:\\\\Users\\\\Usr\\\\claudeprojects\\\\ФСНБ-22\\\\ФСНБ-2022 \\(приказ Минстроя России от 17.02.2026 года № 91пр\\)\\\\ГЭСН.xml\")"
     ]
   }
 }

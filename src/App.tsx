@@ -7,6 +7,10 @@ import DocumentPage from './pages/DocumentPage.tsx';
 import StatementsPage from './pages/StatementsPage.tsx';
 import StatementViewPage from './pages/StatementViewPage.tsx';
 import AdminPage from './pages/AdminPage.tsx';
+import { lazy, Suspense } from 'react';
+import { Spin } from 'antd';
+
+const EstimatePage = lazy(() => import('./pages/EstimatePage.tsx'));
 
 const { Header, Content, Sider } = Layout;
 const { Title } = Typography;
@@ -66,6 +70,11 @@ function AppLayout() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/doc/:id" element={<DocumentPage />} />
+            <Route path="/doc/:docId/estimate/:estimateId" element={
+              <Suspense fallback={<Spin size="large" style={{ display: 'block', margin: '100px auto' }} />}>
+                <EstimatePage />
+              </Suspense>
+            } />
             <Route path="/statements" element={<StatementsPage />} />
             <Route path="/statements/:id" element={<StatementViewPage />} />
             <Route path="/admin" element={<AdminPage />} />

@@ -5,6 +5,7 @@ import { useProjects } from '../hooks/useProjects.ts';
 import { useSections } from '../hooks/useSections.ts';
 import { usePrompts } from '../hooks/usePrompts.ts';
 import type { DbProject, DbSection, DbLlmPrompt } from '../types/database.ts';
+import FsnbTab from '../components/admin/FsnbTab.tsx';
 
 const { Title } = Typography;
 
@@ -309,6 +310,7 @@ export default function AdminPage() {
     { key: 'projects', label: 'Объекты', children: <ProjectsTab /> },
     { key: 'sections', label: 'Разделы', children: <SectionsTab /> },
     { key: 'prompts', label: 'Промпты LLM', children: <PromptsTab /> },
+    { key: 'fsnb', label: 'Справочники ФСНБ', children: <FsnbTab /> },
   ];
 
   return (
