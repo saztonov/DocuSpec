@@ -71,6 +71,9 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
   if (docErr || !doc) throw new Error('Документ не найден');
   if (doc.status !== 'done') throw new Error('Сначала извлеките материалы (статус документа должен быть "done")');
 
+  console.group('📋 [estimate] Сметный пайплайн');
+  console.log('Документ:', doc.doc_code, '| ID:', docId);
+
   // Загрузить section info
   let sectionCode: string | null = null;
   if (doc.section_id) {
@@ -97,6 +100,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
 
   if (estErr || !estimate) throw new Error(`Ошибка создания сметы: ${estErr?.message}`);
   const estimateId = estimate.id;
+  console.log('[estimate] Смета создана:', estimateId);
 
   try {
     // ── Phase A.5: Reconciliation ──────────────────────────────
@@ -107,8 +111,10 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
       agentThinking: 'Дедупликация, зависимости, work hints...',
     });
 
+    console.log('\n[estimate] ═══ Phase A.5: Reconciliation ═══');
     const { runReconciliation } = await import('./reconciliation.ts');
     const reconResult = await runReconciliation(docId);
+    console.log('[estimate] Reconciliation результат:', reconResult);
 
     progress(onProgress, {
       agentThinking: `Reconciliation: ${reconResult.workHintsCount} work hints, ${reconResult.dependencyFlagsCount} зависимостей, ${reconResult.conflictsDetected} конфликтов`,
@@ -124,6 +130,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     if (!materialFacts || materialFacts.length === 0) {
       throw new Error('Нет извлечённых материалов для формирования сметы');
     }
+    console.log(`[estimate] Загружено ${materialFacts.length} material_facts, ${groups.size} групп по construction`);
 
     // Группировка по construction
     const groups = new Map<string, typeof materialFacts>();
@@ -134,6 +141,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     }
 
     // ── Phase B: WorkClassifier (Agent 1) ────────────────────────
+    console.log('\n[estimate] ═══ Phase B: WorkClassifier ═══');
     await supabase.from('estimates').update({ status: 'classifying' }).eq('id', estimateId);
     progress(onProgress, {
       status: 'classifying',
@@ -165,9 +173,12 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
 
     // Parse and save work items
     let workItemsCount = 0;
+    console.log('[estimate] WorkClassifier сырой ответ:', wcResult.finalAnswer?.slice(0, 500));
+    console.log(`[estimate] WorkClassifier шагов: ${wcResult.totalSteps}, токенов: ${wcResult.usage.total_tokens}`);
     try {
       const wcParsed = JSON.parse(stripMarkdownJson(wcResult.finalAnswer));
       const workItems = wcParsed.work_items || wcParsed;
+      console.log(`[estimate] Распарсено work_items: ${Array.isArray(workItems) ? workItems.length : 'не массив'}`);
       for (const wi of Array.isArray(workItems) ? workItems : []) {
         const linkedFacts = materialFacts
           .filter(f => (f.construction || null) === (wi.construction || null))
@@ -186,8 +197,9 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
         });
         workItemsCount++;
       }
-    } catch {
-      console.warn('Не удалось распарсить ответ WorkClassifier:', wcResult.finalAnswer?.slice(0, 200));
+    } catch (wcParseErr) {
+      console.error('[estimate] ❌ Ошибка парсинга WorkClassifier:', wcParseErr);
+      console.error('[estimate] Сырой ответ:', wcResult.finalAnswer?.slice(0, 500));
     }
 
     progress(onProgress, {
@@ -195,6 +207,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     });
 
     // ── Phase C: PricePicker (Agent 2) ───────────────────────────
+    console.log(`\n[estimate] ═══ Phase C: PricePicker (${workItemsCount} видов работ) ═══`);
     await supabase.from('estimates').update({ status: 'pricing' }).eq('id', estimateId);
     progress(onProgress, {
       status: 'pricing',
@@ -217,6 +230,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
         .filter(f => (wi.source_material_fact_ids || []).includes(f.id))
         .map(f => ({ name: f.canonical_name || f.raw_name, gost: f.gost, unit: f.unit }));
 
+      console.log(`[estimate] PricePicker: "${wi.work_description}" (${wiMaterials.length} материалов)`);
       try {
         const ppResult = await runAgent(ppConfig, JSON.stringify({
           work_item_id: wi.id,
@@ -224,6 +238,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
           work_category: wi.work_category,
           materials: wiMaterials,
         }));
+        console.log(`[estimate] PricePicker ответ (${wi.work_description}):`, ppResult.finalAnswer?.slice(0, 300));
 
         // Результат сохраняется через confirm_rate tool внутри агента
         // Но на случай если агент вернул в финальном ответе:
@@ -245,7 +260,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
         } catch { /* saved via tool */ }
         rateMatchesCount++;
       } catch (err) {
-        console.warn(`PricePicker ошибка для "${wi.work_description}":`, err);
+        console.error(`[estimate] ❌ PricePicker ошибка для "${wi.work_description}":`, err);
       }
 
       await new Promise(r => setTimeout(r, 300));
@@ -254,6 +269,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     progress(onProgress, { agentThinking: `Подобрано ${rateMatchesCount} расценок` });
 
     // ── Phase D: ResourceMatcher (Agent 3) ──────────────────────
+    console.log(`\n[estimate] ═══ Phase D: ResourceMatcher (${materialFacts.length} материалов) ═══`);
     await supabase.from('estimates').update({ status: 'matching' }).eq('id', estimateId);
     progress(onProgress, {
       status: 'matching',
@@ -270,6 +286,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     const batchSize = 10;
     for (let i = 0; i < materialFacts.length; i += batchSize) {
       const batch = materialFacts.slice(i, i + batchSize);
+      console.log(`[estimate] ResourceMatcher batch ${i / batchSize + 1}: ${batch.map(f => f.canonical_name || f.raw_name).join(', ').slice(0, 200)}`);
       try {
         const rmResult = await runAgent(rmConfig, JSON.stringify({
           estimate_id: estimateId,
@@ -282,10 +299,11 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
             quantity: f.quantity,
           })),
         }));
+        console.log(`[estimate] ResourceMatcher batch ${i / batchSize + 1} ответ:`, rmResult.finalAnswer?.slice(0, 300));
         // Results saved via confirm_match tool
         resourceMatchesCount += batch.length;
       } catch (err) {
-        console.warn(`ResourceMatcher ошибка batch ${i}:`, err);
+        console.error(`[estimate] ❌ ResourceMatcher ошибка batch ${i / batchSize + 1}:`, err);
       }
 
       progress(onProgress, {
@@ -295,6 +313,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     }
 
     // ── Phase E: VolumeCalculator (Agent 4) ──────────────────────
+    console.log(`\n[estimate] ═══ Phase E: VolumeCalculator ═══`);
     await supabase.from('estimates').update({ status: 'calculating' }).eq('id', estimateId);
     progress(onProgress, {
       status: 'calculating',
@@ -314,6 +333,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     let linesCount = 0;
     for (const rm of rateMatches || []) {
       const factIds = (rm as any).estimate_work_items?.source_material_fact_ids || [];
+      console.log(`[estimate] VolumeCalculator: norm=${rm.norm_code}, unit=${rm.norm_unit}, facts=${factIds.length}`);
       try {
         const vcResult = await runAgent(vcConfig, JSON.stringify({
           estimate_id: estimateId,
@@ -323,6 +343,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
           norm_unit: rm.norm_unit,
           material_fact_ids: factIds,
         }));
+        console.log(`[estimate] VolumeCalculator ответ:`, vcResult.finalAnswer?.slice(0, 300));
 
         // Results saved via tools or parsed from final answer
         try {
@@ -344,7 +365,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
           }
         } catch { /* saved via tool */ }
       } catch (err) {
-        console.warn('VolumeCalculator ошибка:', err);
+        console.error('[estimate] ❌ VolumeCalculator ошибка:', err);
       }
 
       await new Promise(r => setTimeout(r, 200));
@@ -353,6 +374,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     progress(onProgress, { agentThinking: `Сформировано ${linesCount} позиций сметы` });
 
     // ── Phase F: Validation ──────────────────────────────────────
+    console.log(`\n[estimate] ═══ Phase F: Валидация ═══`);
     await supabase.from('estimates').update({ status: 'validating' }).eq('id', estimateId);
     progress(onProgress, {
       status: 'validating',
@@ -364,6 +386,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
 
     const { validateEstimate } = await import('./estimateValidator.ts');
     const validation = await validateEstimate(estimateId, docId);
+    console.log(`[estimate] Валидация: ${validation.errors} ошибок, ${validation.warnings} предупреждений, ${validation.infos} инфо`);
 
     progress(onProgress, {
       agentThinking: `Валидация: ${validation.errors} ошибок, ${validation.warnings} предупреждений, ${validation.infos} инфо`,
@@ -375,7 +398,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
       updated_at: new Date().toISOString(),
     }).eq('id', estimateId);
 
-    return {
+    const result = {
       estimateId,
       workItemsCount,
       rateMatchesCount,
@@ -384,7 +407,14 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
       issuesCount: validation.issues.length,
     };
 
+    console.log('\n[estimate] ═══ ГОТОВО ═══');
+    console.log('[estimate] Результат:', result);
+    console.groupEnd();
+    return result;
+
   } catch (err) {
+    console.error('\n[estimate] ❌ КРИТИЧЕСКАЯ ОШИБКА:', err);
+    console.groupEnd();
     // Пометить смету как ошибочную
     await supabase.from('estimates').update({
       status: 'error',

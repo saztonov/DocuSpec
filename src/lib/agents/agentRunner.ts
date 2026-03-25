@@ -35,6 +35,12 @@ function parseToolArgs(raw: string): unknown {
   }
 }
 
+/** Сокращение длинных строк для логов */
+function truncate(val: unknown, maxLen = 300): string {
+  const s = typeof val === 'string' ? val : JSON.stringify(val);
+  return s && s.length > maxLen ? s.slice(0, maxLen) + '…' : (s ?? '');
+}
+
 /** Accumulate usage counters across multiple LLM calls. */
 function addUsage(
   acc: AgentResult['usage'],
@@ -86,7 +92,15 @@ export async function runAgent(
 
   let lastThinking: string | null = null;
 
+  console.group(`🤖 [Agent: ${config.name}] старт`);
+  console.log('Задание:', truncate(userMessage));
+  console.log('Tools:', config.tools.map(t => t.name).join(', '));
+  console.log('Max steps:', config.maxSteps);
+
   for (let stepNum = 1; stepNum <= config.maxSteps; stepNum++) {
+    const stepStart = Date.now();
+    console.log(`\n── Шаг ${stepNum}/${config.maxSteps} ──`);
+
     // Call LLM with current conversation + tool definitions
     const response = await callLlmWithTools({
       messages: messages as LlmMessage[],
@@ -96,10 +110,15 @@ export async function runAgent(
     });
 
     addUsage(usage, response.usage);
+    console.log(`LLM ответ: stop_reason=${response.stop_reason}, tool_calls=${response.tool_calls?.length ?? 0}, ${Date.now() - stepStart}ms`);
+    if (response.content) console.log('Thinking:', truncate(response.content, 200));
 
     // ── Final text answer ──────────────────────────────────────
     if (response.stop_reason === 'end_turn') {
       const finalText = response.content ?? '';
+      console.log('✅ Финальный ответ:', truncate(finalText, 500));
+      console.log(`Итого: ${steps.length} шагов, ${usage.total_tokens} токенов`);
+      console.groupEnd();
       return {
         finalAnswer: finalText,
         steps,
@@ -110,6 +129,8 @@ export async function runAgent(
 
     // ── Context-length limit reached ───────────────────────────
     if (response.stop_reason === 'length') {
+      console.warn('⚠️ Лимит контекста достигнут');
+      console.groupEnd();
       return {
         finalAnswer:
           response.content ??
@@ -136,15 +157,20 @@ export async function runAgent(
         const parsedInput = parseToolArgs(toolCall.function.arguments);
 
         let output: unknown;
+        const toolStart = Date.now();
         if (!tool) {
           output = { error: `Неизвестный инструмент: ${toolCall.function.name}` };
+          console.error(`  ❌ Tool "${toolCall.function.name}" не найден`);
         } else {
+          console.log(`  🔧 ${toolCall.function.name}(${truncate(parsedInput, 150)})`);
           try {
             output = await tool.execute(parsedInput);
+            console.log(`     → ${truncate(output, 200)} (${Date.now() - toolStart}ms)`);
           } catch (err) {
             output = {
               error: err instanceof Error ? err.message : String(err),
             };
+            console.error(`     ❌ Ошибка: ${(output as { error: string }).error}`);
           }
         }
 
@@ -198,6 +224,8 @@ export async function runAgent(
     }
 
     // ── Unexpected stop reason (e.g. 'stop' without tool_calls) ─
+    console.warn(`⚠️ Неожиданный stop_reason: ${response.stop_reason}`);
+    console.groupEnd();
     return {
       finalAnswer: response.content ?? lastThinking ?? '[Ответ не получен]',
       steps,
@@ -207,6 +235,8 @@ export async function runAgent(
   }
 
   // maxSteps exhausted — return whatever we have
+  console.warn(`⚠️ Лимит шагов (${config.maxSteps}) исчерпан`);
+  console.groupEnd();
   return {
     finalAnswer:
       lastThinking ?? '[Лимит шагов исчерпан, финальный ответ не получен]',
