@@ -450,7 +450,7 @@ function parseTgNormLinks(xmlPath: string): ParsedTgNormLink[] {
 // ── Главная функция ───────────────────────────────────────────
 
 function main(): void {
-  const defaultBase = 'C:\\Users\\Usr\\claudeprojects\\ФСНБ-22';
+  const defaultBase = 'C:\\Работа\\DocuSpec\\ФСНБ';
   let sourceDir = process.argv[2];
 
   if (!sourceDir) {
