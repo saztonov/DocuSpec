@@ -130,7 +130,6 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     if (!materialFacts || materialFacts.length === 0) {
       throw new Error('Нет извлечённых материалов для формирования сметы');
     }
-    console.log(`[estimate] Загружено ${materialFacts.length} material_facts, ${groups.size} групп по construction`);
 
     // Группировка по construction
     const groups = new Map<string, typeof materialFacts>();
@@ -139,6 +138,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(fact);
     }
+    console.log(`[estimate] Загружено ${materialFacts.length} material_facts, ${groups.size} групп по construction`);
 
     // ── Phase B: WorkClassifier (Agent 1) ────────────────────────
     console.log('\n[estimate] ═══ Phase B: WorkClassifier ═══');
