@@ -285,9 +285,17 @@ export async function importFsnbData(
         };
       });
 
+      // Дедупликация по norm_code внутри batch (ON CONFLICT не может обработать дубли в одном INSERT)
+      const seen = new Set<string>();
+      const dedupedRows = rows.filter(r => {
+        if (seen.has(r.norm_code)) return false;
+        seen.add(r.norm_code);
+        return true;
+      });
+
       const { error } = await supabase
         .from('fsnb_norms')
-        .upsert(rows, { onConflict: 'norm_code' });
+        .upsert(dedupedRows, { onConflict: 'norm_code' });
 
       if (error) {
         console.error(`[fsnbImporter] Ошибка upsert норм (batch ${bi + 1}):`, error.message);

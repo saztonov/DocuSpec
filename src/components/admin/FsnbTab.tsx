@@ -182,7 +182,7 @@ export default function FsnbTab() {
   );
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       {/* Статистика */}
       <Row gutter={16}>
         <Col span={6}>
@@ -251,7 +251,7 @@ export default function FsnbTab() {
       <Alert
         type="info"
         showIcon
-        message="Подготовка данных"
+        title="Подготовка данных"
         description={
           <>
             Сначала выполните: <Text code>npx tsx scripts/fsnb-xml-to-json.ts</Text> — скрипт создаст JSON-файлы
@@ -304,7 +304,7 @@ export default function FsnbTab() {
       {/* Прогресс импорта */}
       {importProgress && (
         <Card size="small">
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
             <Text strong>{importProgress.message}</Text>
             <Progress
               percent={importProgress.total > 0
