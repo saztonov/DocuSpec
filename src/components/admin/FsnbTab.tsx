@@ -7,7 +7,6 @@ import {
   UploadOutlined, SearchOutlined, DatabaseOutlined,
   CloudUploadOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
-import type { UploadFile } from 'antd';
 import { supabase } from '../../lib/supabase.ts';
 import type { ImportProgress } from '../../lib/fsnbImporter.ts';
 
@@ -88,11 +87,10 @@ export default function FsnbTab() {
     loadCollections();
   }
 
-  // Handle JSON file selection
-  const handleFileLoad = useCallback(async (file: UploadFile) => {
-    if (!file.originFileObj) return false;
+  // Handle JSON file selection — beforeUpload receives RcFile (which is a File)
+  const handleFileLoad = useCallback(async (file: File) => {
     try {
-      const text = await file.originFileObj.text();
+      const text = await file.text();
       const data = JSON.parse(text);
       setJsonFiles(prev => ({ ...prev, [file.name]: data }));
       message.success(`${file.name}: ${Array.isArray(data) ? data.length + ' записей' : 'загружен'}`);
@@ -267,7 +265,7 @@ export default function FsnbTab() {
           multiple
           accept=".json"
           beforeUpload={(file) => {
-            handleFileLoad(file as unknown as UploadFile);
+            handleFileLoad(file);
             return false;
           }}
           showUploadList={false}
