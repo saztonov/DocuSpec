@@ -107,8 +107,9 @@ export interface ParsedTgNormLink {
 // ── Constants ──────────────────────────────────────────────────
 
 const DATA_BATCH_SIZE = 500;
-const EMBEDDING_BATCH_SIZE = 50;
-const EMBEDDING_DELAY_MS = 200;
+const EMBEDDING_BATCH_SIZE = 500;    // text-embedding-3-small поддерживает до 2048 за запрос
+const EMBEDDING_DELAY_MS = 100;
+const EMBEDDING_UPDATE_CHUNK = 50;   // обновление в БД по 50 параллельно
 
 /** Map base_type from JSON → collection code/name/base_type for DB */
 const COLLECTION_DEFS: Record<string, { code: string; name: string; base_type: string }> = {
@@ -721,23 +722,23 @@ async function generateEmbeddings(
     try {
       const embeddings = await callEmbeddingApi({ texts });
 
-      // Update each row with its embedding
-      // Supabase JS client does not support batch update with different values,
-      // so we update one by one. To reduce round-trips, we use Promise.all
-      // with a concurrency of the batch size (they are already small batches).
-      const updatePromises = ids.map((id, idx) =>
-        supabase
-          .from(table)
-          .update({ embedding: JSON.stringify(embeddings[idx]) })
-          .eq('id', id)
-          .then(({ error: updateError }) => {
-            if (updateError) {
-              console.error(`[fsnbImporter] Ошибка обновления embedding ${table}/${id}:`, updateError.message);
-            }
-          }),
-      );
-
-      await Promise.all(updatePromises);
+      // Update rows with embeddings in chunks to avoid overwhelming Supabase
+      for (let ci = 0; ci < ids.length; ci += EMBEDDING_UPDATE_CHUNK) {
+        const chunkIds = ids.slice(ci, ci + EMBEDDING_UPDATE_CHUNK);
+        const chunkEmbeddings = embeddings.slice(ci, ci + EMBEDDING_UPDATE_CHUNK);
+        const updatePromises = chunkIds.map((id, idx) =>
+          supabase
+            .from(table)
+            .update({ embedding: JSON.stringify(chunkEmbeddings[idx]) })
+            .eq('id', id)
+            .then(({ error: updateError }) => {
+              if (updateError) {
+                console.error(`[fsnbImporter] Ошибка обновления embedding ${table}/${id}:`, updateError.message);
+              }
+            }),
+        );
+        await Promise.all(updatePromises);
+      }
 
       processed += rows.length;
       report(phase, `${label}: ${processed} / ${total}`, processed, total);
