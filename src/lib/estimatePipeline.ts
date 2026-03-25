@@ -13,6 +13,12 @@
 import { supabase } from './supabase.ts';
 import type { EstimateProgress } from '../types/estimate.ts';
 
+/** Убирает markdown code block обёртку (```json ... ```) из ответа LLM */
+function stripMarkdownJson(text: string): string {
+  const match = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  return match ? match[1].trim() : text.trim();
+}
+
 export interface PipelineOptions {
   docId: string;
   model?: string;
@@ -160,7 +166,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     // Parse and save work items
     let workItemsCount = 0;
     try {
-      const wcParsed = JSON.parse(wcResult.finalAnswer);
+      const wcParsed = JSON.parse(stripMarkdownJson(wcResult.finalAnswer));
       const workItems = wcParsed.work_items || wcParsed;
       for (const wi of Array.isArray(workItems) ? workItems : []) {
         const linkedFacts = materialFacts
@@ -203,7 +209,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
       .eq('estimate_id', estimateId);
 
     const { createPricePickerConfig } = await import('./agents/pricePicker.ts');
-    const ppConfig = createPricePickerConfig({ model });
+    const ppConfig = createPricePickerConfig(estimateId, { model });
 
     let rateMatchesCount = 0;
     for (const wi of workItems || []) {
@@ -222,7 +228,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
         // Результат сохраняется через confirm_rate tool внутри агента
         // Но на случай если агент вернул в финальном ответе:
         try {
-          const parsed = JSON.parse(ppResult.finalAnswer);
+          const parsed = JSON.parse(stripMarkdownJson(ppResult.finalAnswer));
           if (parsed.norm_code && !parsed.saved) {
             await supabase.from('estimate_rate_matches').insert({
               estimate_id: estimateId,
@@ -257,7 +263,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     });
 
     const { createResourceMatcherConfig } = await import('./agents/resourceMatcher.ts');
-    const rmConfig = createResourceMatcherConfig({ model });
+    const rmConfig = createResourceMatcherConfig(estimateId, { model });
 
     let resourceMatchesCount = 0;
     // Process in batches of 10 materials
@@ -320,7 +326,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
 
         // Results saved via tools or parsed from final answer
         try {
-          const parsed = JSON.parse(vcResult.finalAnswer);
+          const parsed = JSON.parse(stripMarkdownJson(vcResult.finalAnswer));
           if (parsed.volume !== undefined) {
             await supabase.from('estimate_lines').insert({
               estimate_id: estimateId,
