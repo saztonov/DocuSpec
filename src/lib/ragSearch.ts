@@ -14,6 +14,19 @@ import type {
   FsnbBaseType,
 } from '../types/fsnb';
 
+// ── Session-level flag: skip hybrid search if it keeps timing out ──
+let hybridSearchDisabled = false;
+let hybridFailCount = 0;
+const HYBRID_FAIL_THRESHOLD = 2; // после 2 таймаутов — отключаем на сессию
+
+function markHybridFailed() {
+  hybridFailCount++;
+  if (hybridFailCount >= HYBRID_FAIL_THRESHOLD) {
+    hybridSearchDisabled = true;
+    console.warn(`[ragSearch] Hybrid search отключён на сессию (${hybridFailCount} таймаутов). Только FTS.`);
+  }
+}
+
 // ── Embedding helpers ───────────────────────────────────────────
 
 /**
@@ -58,6 +71,23 @@ export async function embedBatch(
 // ── FTS-only fallback ──────────────────────────────────────────
 
 /**
+ * Построить FTS-запрос: сначала AND по ключевым словам (>3 букв),
+ * если слов мало — OR. Это даёт релевантность без пустых результатов.
+ */
+function buildFtsQuery(query: string): string {
+  const words = query
+    .replace(/[^\wа-яёА-ЯЁ\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2);
+  if (words.length === 0) return query;
+  if (words.length <= 2) return words.join(' | ');
+  // Берём 2-3 самых длинных слова (наиболее специфичные) через AND
+  const sorted = [...words].sort((a, b) => b.length - a.length);
+  const topWords = sorted.slice(0, 3);
+  return topWords.join(' & ');
+}
+
+/**
  * Полнотекстовый поиск ресурсов (без вектора) — fallback при timeout.
  */
 async function ftsSearchResources(
@@ -65,18 +95,46 @@ async function ftsSearchResources(
   resourceType?: string,
   limit = 20,
 ): Promise<FsnbSearchResult[]> {
-  console.warn('[ragSearch] Fallback на FTS-only поиск ресурсов');
+  const ftsQuery = buildFtsQuery(query);
+  console.log(`[ragSearch] FTS ресурсов: "${ftsQuery}" (из "${query}")`);
+
   let q = supabase
     .from('fsnb_resources')
     .select('id, code, name, measure_unit, resource_type')
-    .textSearch('search_text', query.split(/\s+/).join(' & '), { type: 'plain', config: 'russian' })
+    .textSearch('search_text', ftsQuery, { type: 'plain', config: 'russian' })
     .limit(limit);
 
   if (resourceType) q = q.eq('resource_type', resourceType);
 
   const { data, error } = await q;
+
+  // Если FTS не нашёл — пробуем ilike по первому слову
+  if ((!data || data.length === 0) && !error) {
+    const mainWord = query.split(/\s+/).sort((a, b) => b.length - a.length)[0];
+    if (mainWord && mainWord.length > 3) {
+      console.log(`[ragSearch] FTS пусто, пробуем ilike "%${mainWord}%"`);
+      let q2 = supabase
+        .from('fsnb_resources')
+        .select('id, code, name, measure_unit, resource_type')
+        .ilike('name', `%${mainWord}%`)
+        .limit(limit);
+      if (resourceType) q2 = q2.eq('resource_type', resourceType);
+      const { data: d2 } = await q2;
+      if (d2 && d2.length > 0) {
+        return (d2 as Array<{
+          id: string; code: string; name: string;
+          measure_unit: string | null; resource_type: FsnbResourceType;
+        }>).map((row, i) => ({
+          id: row.id, code: row.code, name: row.name,
+          measure_unit: row.measure_unit, resource_type: row.resource_type,
+          score: 0.5 / (1 + i),
+        }));
+      }
+    }
+  }
+
   if (error) {
-    console.error('[ragSearch] FTS ресурсов тоже ошибка:', error.message);
+    console.error('[ragSearch] FTS ресурсов ошибка:', error.message);
     return [];
   }
 
@@ -98,18 +156,47 @@ async function ftsSearchNorms(
   baseType?: string,
   limit = 20,
 ): Promise<FsnbNormSearchResult[]> {
-  console.warn('[ragSearch] Fallback на FTS-only поиск норм');
+  const ftsQuery = buildFtsQuery(query);
+  console.log(`[ragSearch] FTS норм: "${ftsQuery}" (из "${query}")`);
+
   let q = supabase
     .from('fsnb_norms')
     .select('id, norm_code, name, measure_unit, base_type, work_category')
-    .textSearch('search_text', query.split(/\s+/).join(' & '), { type: 'plain', config: 'russian' })
+    .textSearch('search_text', ftsQuery, { type: 'plain', config: 'russian' })
     .limit(limit);
 
   if (baseType) q = q.eq('base_type', baseType);
 
   const { data, error } = await q;
+
+  // Если FTS не нашёл — пробуем ilike
+  if ((!data || data.length === 0) && !error) {
+    const mainWord = query.split(/\s+/).sort((a, b) => b.length - a.length)[0];
+    if (mainWord && mainWord.length > 3) {
+      console.log(`[ragSearch] FTS норм пусто, пробуем ilike "%${mainWord}%"`);
+      let q2 = supabase
+        .from('fsnb_norms')
+        .select('id, norm_code, name, measure_unit, base_type, work_category')
+        .ilike('name', `%${mainWord}%`)
+        .limit(limit);
+      if (baseType) q2 = q2.eq('base_type', baseType);
+      const { data: d2 } = await q2;
+      if (d2 && d2.length > 0) {
+        return (d2 as Array<{
+          id: string; norm_code: string; name: string;
+          measure_unit: string; base_type: FsnbBaseType;
+          work_category: string | null;
+        }>).map((row, i) => ({
+          id: row.id, norm_code: row.norm_code, name: row.name,
+          measure_unit: row.measure_unit, base_type: row.base_type,
+          work_category: row.work_category, score: 0.5 / (1 + i),
+        }));
+      }
+    }
+  }
+
   if (error) {
-    console.error('[ragSearch] FTS норм тоже ошибка:', error.message);
+    console.error('[ragSearch] FTS норм ошибка:', error.message);
     return [];
   }
 
@@ -129,6 +216,7 @@ async function ftsSearchNorms(
 /**
  * Гибридный поиск ресурсов ФСНБ (вектор + полнотекст).
  * При timeout/ошибке автоматически переключается на FTS-only.
+ * После 2 таймаутов — отключает hybrid на всю сессию.
  */
 export async function searchResources(
   query: string,
@@ -138,6 +226,11 @@ export async function searchResources(
   },
 ): Promise<FsnbSearchResult[]> {
   const { resourceType, limit = 20 } = opts ?? {};
+
+  // Если hybrid отключён — сразу FTS, без ожидания timeout
+  if (hybridSearchDisabled) {
+    return ftsSearchResources(query, resourceType, limit);
+  }
 
   try {
     const queryEmbedding = await embedText(query);
@@ -151,6 +244,7 @@ export async function searchResources(
 
     if (error) {
       console.warn(`[ragSearch] hybrid_search_resources ошибка: ${error.message}`);
+      markHybridFailed();
       return ftsSearchResources(query, resourceType, limit);
     }
 
@@ -171,6 +265,7 @@ export async function searchResources(
     }));
   } catch (e) {
     console.warn('[ragSearch] hybrid_search_resources exception, fallback на FTS:', e);
+    markHybridFailed();
     return ftsSearchResources(query, resourceType, limit);
   }
 }
@@ -223,6 +318,11 @@ export async function searchNorms(
 ): Promise<FsnbNormSearchResult[]> {
   const { baseType, limit = 20 } = opts ?? {};
 
+  // Если hybrid отключён — сразу FTS
+  if (hybridSearchDisabled) {
+    return ftsSearchNorms(query, baseType, limit);
+  }
+
   try {
     const queryEmbedding = await embedText(query);
 
@@ -236,6 +336,7 @@ export async function searchNorms(
 
     if (error) {
       console.warn(`[ragSearch] hybrid_search_norms ошибка: ${error.message}`);
+      markHybridFailed();
       return ftsSearchNorms(query, baseType, limit);
     }
 
@@ -258,6 +359,7 @@ export async function searchNorms(
     }));
   } catch (e) {
     console.warn('[ragSearch] hybrid_search_norms exception, fallback на FTS:', e);
+    markHybridFailed();
     return ftsSearchNorms(query, baseType, limit);
   }
 }
