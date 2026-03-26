@@ -17,7 +17,7 @@ import type {
 // ── Session-level flag: skip hybrid search if it keeps timing out ──
 let hybridSearchDisabled = false;
 let hybridFailCount = 0;
-const HYBRID_FAIL_THRESHOLD = 2; // после 2 таймаутов — отключаем на сессию
+const HYBRID_FAIL_THRESHOLD = 1; // после 1 таймаута — отключаем на сессию
 
 function markHybridFailed() {
   hybridFailCount++;
@@ -374,17 +374,38 @@ export interface NormCompositionRow {
   measure_unit: string | null;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Получить ресурсный состав нормы (строки из fsnb_norm_resources).
+ * Принимает UUID или norm_code — автоматически резолвит.
  */
-export async function getNormComposition(normId: string): Promise<NormCompositionRow[]> {
+export async function getNormComposition(normIdOrCode: string): Promise<NormCompositionRow[]> {
+  let normUuid = normIdOrCode;
+
+  if (!UUID_RE.test(normIdOrCode)) {
+    console.log(`[ragSearch] getNormComposition: "${normIdOrCode}" не UUID, ищем по norm_code`);
+    const { data: norm } = await supabase
+      .from('fsnb_norms')
+      .select('id')
+      .eq('norm_code', normIdOrCode)
+      .limit(1)
+      .maybeSingle();
+    if (!norm) {
+      console.warn(`[ragSearch] Норма с кодом "${normIdOrCode}" не найдена`);
+      return [];
+    }
+    normUuid = norm.id as string;
+  }
+
   const { data, error } = await supabase
     .from('fsnb_norm_resources')
     .select('resource_code, resource_name, resource_type, consumption, measure_unit')
-    .eq('norm_id', normId);
+    .eq('norm_id', normUuid);
 
   if (error) {
-    throw new Error(`getNormComposition failed: ${error.message}`);
+    console.error(`[ragSearch] getNormComposition error:`, error.message);
+    return [];
   }
 
   return (data ?? []) as NormCompositionRow[];

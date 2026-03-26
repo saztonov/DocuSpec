@@ -33,6 +33,7 @@ export async function validateEstimate(estimateId: string, docId: string): Promi
     checkUncoveredMaterials(estimateId, docId, issues),
     checkUnitMismatches(estimateId, issues),
     checkDoubleCount(docId, issues),
+    checkWorkItemDuplicates(estimateId, issues),
     checkCrossVolumeDeps(docId, issues),
     checkLayerFacts(docId, issues),
     checkLowCoverage(estimateId, issues),
@@ -159,6 +160,39 @@ async function checkDoubleCount(
       related_material_fact_id: dupe.id,
       suggested_action: 'Проверьте, не дублируется ли объём',
     });
+  }
+}
+
+/** Один material_fact назначен нескольким work_items */
+async function checkWorkItemDuplicates(
+  estimateId: string,
+  issues: ValidationIssue[],
+): Promise<void> {
+  const { data: workItems } = await supabase
+    .from('estimate_work_items')
+    .select('id, work_description, source_material_fact_ids')
+    .eq('estimate_id', estimateId);
+
+  if (!workItems || workItems.length === 0) return;
+
+  const factToWorkItems = new Map<string, string[]>();
+  for (const wi of workItems) {
+    for (const factId of wi.source_material_fact_ids || []) {
+      if (!factToWorkItems.has(factId)) factToWorkItems.set(factId, []);
+      factToWorkItems.get(factId)!.push(wi.work_description);
+    }
+  }
+
+  for (const [factId, wiNames] of factToWorkItems) {
+    if (wiNames.length > 1) {
+      issues.push({
+        severity: 'warning',
+        issue_type: 'double_count',
+        description: `Материал назначен ${wiNames.length} работам: ${wiNames.map(n => `"${n}"`).join(', ')}. Возможен двойной счёт.`,
+        related_material_fact_id: factId,
+        suggested_action: 'Оставьте материал только в одной работе',
+      });
+    }
   }
 }
 

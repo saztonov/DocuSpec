@@ -312,115 +312,93 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
       await new Promise(r => setTimeout(r, 300));
     }
 
-    // ── Phase E: VolumeCalculator (Agent 4) ──────────────────────
-    console.log(`\n[estimate] ═══ Phase E: VolumeCalculator ═══`);
+    // ── Phase E: Сборка позиций сметы ──────────────────────────
+    console.log(`\n[estimate] ═══ Phase E: Сборка позиций сметы ═══`);
     await supabase.from('estimates').update({ status: 'calculating' }).eq('id', estimateId);
     progress(onProgress, {
       status: 'calculating',
-      phase: 'Phase E: Расчёт объёмов',
-      currentAgent: 'VolumeCalculator',
+      phase: 'Phase E: Сборка позиций сметы',
+      currentAgent: 'LineAssembler',
       currentStep: 5,
     });
 
+    // 1. Загрузить ВСЕ work_items
+    const { data: allWorkItems } = await supabase
+      .from('estimate_work_items')
+      .select('*')
+      .eq('estimate_id', estimateId)
+      .order('created_at');
+
+    // 2. Загрузить rate_matches и построить map work_item_id → rate_match
     const { data: rateMatches } = await supabase
       .from('estimate_rate_matches')
-      .select('*, estimate_work_items!inner(source_material_fact_ids)')
+      .select('*')
       .eq('estimate_id', estimateId);
 
-    const { createVolumeCalculatorConfig } = await import('./agents/volumeCalculator.ts');
-    const vcConfig = createVolumeCalculatorConfig({ model });
-
-    let linesCount = 0;
+    const rateMatchByWi = new Map<string, typeof rateMatches extends Array<infer T> ? T : never>();
     for (const rm of rateMatches || []) {
-      const factIds = (rm as any).estimate_work_items?.source_material_fact_ids || [];
-      console.log(`[estimate] VolumeCalculator: norm=${rm.norm_code}, unit=${rm.norm_unit}, facts=${factIds.length}`);
-      try {
-        const vcResult = await runAgent(vcConfig, JSON.stringify({
-          estimate_id: estimateId,
-          rate_match_id: rm.id,
-          work_item_id: rm.work_item_id,
-          norm_code: rm.norm_code,
-          norm_unit: rm.norm_unit,
-          material_fact_ids: factIds,
-        }));
-        console.log(`[estimate] VolumeCalculator ответ:`, vcResult.finalAnswer?.slice(0, 300));
-
-        // Results saved via tools or parsed from final answer
-        try {
-          const parsed = JSON.parse(stripMarkdownJson(vcResult.finalAnswer));
-          if (parsed.volume !== undefined) {
-            await supabase.from('estimate_lines').insert({
-              estimate_id: estimateId,
-              sort_order: linesCount + 1,
-              rate_match_id: rm.id,
-              work_item_id: rm.work_item_id,
-              justification: rm.norm_code ? `ГЭСН ${rm.norm_code}` : null,
-              description: rm.norm_name || 'Не определено',
-              measure_unit: rm.norm_unit,
-              volume: parsed.volume,
-              volume_calc_note: parsed.calc_note || null,
-              source_material_fact_ids: factIds,
-            });
-            linesCount++;
-          }
-        } catch { /* saved via tool */ }
-      } catch (err) {
-        console.error('[estimate] ❌ VolumeCalculator ошибка:', err);
-      }
-
-      await new Promise(r => setTimeout(r, 200));
+      rateMatchByWi.set(rm.work_item_id, rm);
     }
 
-    // Fallback: если расценок 0, формировать позиции напрямую из work_items + material_facts
-    if (linesCount === 0) {
-      console.log('[estimate] ⚠️ Расценки не найдены — формируем позиции сметы из work_items + material_facts');
-      const { data: allWorkItems } = await supabase
-        .from('estimate_work_items')
-        .select('*')
-        .eq('estimate_id', estimateId)
-        .order('created_at');
+    // 3. Для КАЖДОГО work_item формируем строки сметы
+    let linesCount = 0;
+    let sortOrder = 0;
 
-      for (const wi of allWorkItems || []) {
-        linesCount++;
-        // Строка работы
-        await supabase.from('estimate_lines').insert({
-          estimate_id: estimateId,
-          sort_order: linesCount,
-          work_item_id: wi.id,
-          line_number: String(linesCount),
-          description: wi.work_description,
-          measure_unit: null,
-          volume: null,
-          volume_calc_note: 'Расценка ГЭСН не подобрана',
-          source_material_fact_ids: wi.source_material_fact_ids || [],
-        });
+    for (let wiIdx = 0; wiIdx < (allWorkItems || []).length; wiIdx++) {
+      const wi = allWorkItems![wiIdx];
+      const workNum = wiIdx + 1;
+      const rm = rateMatchByWi.get(wi.id);
 
-        // Строки материалов для этой работы
-        const factIds = wi.source_material_fact_ids || [];
-        if (factIds.length > 0) {
-          const { data: facts } = await supabase
-            .from('material_facts')
-            .select('id, canonical_name, raw_name, quantity, unit, confidence')
-            .in('id', factIds);
+      // Родительская строка — работа
+      sortOrder++;
+      await supabase.from('estimate_lines').insert({
+        estimate_id: estimateId,
+        sort_order: sortOrder,
+        work_item_id: wi.id,
+        rate_match_id: rm?.id ?? null,
+        line_number: String(workNum),
+        description: wi.work_description,
+        justification: rm?.norm_code ? `ГЭСН ${rm.norm_code}` : null,
+        measure_unit: rm?.norm_unit ?? null,
+        volume: null,
+        volume_calc_note: rm ? null : 'Расценка ГЭСН не подобрана',
+        source_material_fact_ids: wi.source_material_fact_ids || [],
+      });
+      linesCount++;
 
-          let subIdx = 1;
-          for (const fact of facts || []) {
-            linesCount++;
-            await supabase.from('estimate_lines').insert({
-              estimate_id: estimateId,
-              sort_order: linesCount,
-              work_item_id: wi.id,
-              line_number: `${allWorkItems!.indexOf(wi) + 1}.${subIdx}`,
-              description: `  ${fact.canonical_name || fact.raw_name}`,
-              measure_unit: fact.unit,
-              volume: fact.quantity,
-              source_material_fact_ids: [fact.id],
-            });
-            subIdx++;
-          }
+      console.log(`[estimate] Позиция ${workNum}: "${wi.work_description}" ${rm ? `→ ГЭСН ${rm.norm_code}` : '(без расценки)'}`);
+
+      // Дочерние строки — материалы
+      const factIds: string[] = wi.source_material_fact_ids || [];
+      if (factIds.length > 0) {
+        const { data: facts } = await supabase
+          .from('material_facts')
+          .select('id, canonical_name, raw_name, quantity, unit, confidence')
+          .in('id', factIds);
+
+        let subIdx = 0;
+        for (const fact of facts || []) {
+          subIdx++;
+          sortOrder++;
+          await supabase.from('estimate_lines').insert({
+            estimate_id: estimateId,
+            sort_order: sortOrder,
+            work_item_id: wi.id,
+            line_number: `${workNum}.${subIdx}`,
+            description: `  ${fact.canonical_name || fact.raw_name}`,
+            measure_unit: fact.unit,
+            volume: fact.quantity,
+            source_material_fact_ids: [fact.id],
+          });
+          linesCount++;
         }
+        console.log(`[estimate]   └─ ${subIdx} материалов`);
       }
-      console.log(`[estimate] Fallback: сформировано ${linesCount} позиций из work_items`);
+    }
+
+    console.log(`[estimate] Итого сформировано ${linesCount} позиций сметы (${(allWorkItems || []).length} работ)`);
+    if (linesCount === 0) {
+      console.warn('[estimate] ⚠️ Нет work_items — смета пуста');
     }
 
     progress(onProgress, { agentThinking: `Сформировано ${linesCount} позиций сметы` });
