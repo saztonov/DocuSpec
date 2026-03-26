@@ -55,12 +55,80 @@ export async function embedBatch(
   return results;
 }
 
+// ── FTS-only fallback ──────────────────────────────────────────
+
+/**
+ * Полнотекстовый поиск ресурсов (без вектора) — fallback при timeout.
+ */
+async function ftsSearchResources(
+  query: string,
+  resourceType?: string,
+  limit = 20,
+): Promise<FsnbSearchResult[]> {
+  console.warn('[ragSearch] Fallback на FTS-only поиск ресурсов');
+  let q = supabase
+    .from('fsnb_resources')
+    .select('id, code, name, measure_unit, resource_type')
+    .textSearch('search_text', query.split(/\s+/).join(' & '), { type: 'plain', config: 'russian' })
+    .limit(limit);
+
+  if (resourceType) q = q.eq('resource_type', resourceType);
+
+  const { data, error } = await q;
+  if (error) {
+    console.error('[ragSearch] FTS ресурсов тоже ошибка:', error.message);
+    return [];
+  }
+
+  return ((data ?? []) as Array<{
+    id: string; code: string; name: string;
+    measure_unit: string | null; resource_type: FsnbResourceType;
+  }>).map((row, i) => ({
+    id: row.id, code: row.code, name: row.name,
+    measure_unit: row.measure_unit, resource_type: row.resource_type,
+    score: 1 / (1 + i),
+  }));
+}
+
+/**
+ * Полнотекстовый поиск норм (без вектора) — fallback при timeout.
+ */
+async function ftsSearchNorms(
+  query: string,
+  baseType?: string,
+  limit = 20,
+): Promise<FsnbNormSearchResult[]> {
+  console.warn('[ragSearch] Fallback на FTS-only поиск норм');
+  let q = supabase
+    .from('fsnb_norms')
+    .select('id, norm_code, name, measure_unit, base_type, work_category')
+    .textSearch('search_text', query.split(/\s+/).join(' & '), { type: 'plain', config: 'russian' })
+    .limit(limit);
+
+  if (baseType) q = q.eq('base_type', baseType);
+
+  const { data, error } = await q;
+  if (error) {
+    console.error('[ragSearch] FTS норм тоже ошибка:', error.message);
+    return [];
+  }
+
+  return ((data ?? []) as Array<{
+    id: string; norm_code: string; name: string;
+    measure_unit: string; base_type: FsnbBaseType;
+    work_category: string | null;
+  }>).map((row, i) => ({
+    id: row.id, norm_code: row.norm_code, name: row.name,
+    measure_unit: row.measure_unit, base_type: row.base_type,
+    work_category: row.work_category, score: 1 / (1 + i),
+  }));
+}
+
 // ── Hybrid search: resources ────────────────────────────────────
 
 /**
  * Гибридный поиск ресурсов ФСНБ (вектор + полнотекст).
- *
- * Вызывает SQL-функцию `hybrid_search_resources` в Supabase.
+ * При timeout/ошибке автоматически переключается на FTS-only.
  */
 export async function searchResources(
   query: string,
@@ -71,34 +139,40 @@ export async function searchResources(
 ): Promise<FsnbSearchResult[]> {
   const { resourceType, limit = 20 } = opts ?? {};
 
-  const queryEmbedding = await embedText(query);
+  try {
+    const queryEmbedding = await embedText(query);
 
-  const { data, error } = await supabase.rpc('hybrid_search_resources', {
-    query_embedding: queryEmbedding,
-    query_text: query,
-    resource_type_filter: resourceType ?? null,
-    match_limit: limit,
-  });
+    const { data, error } = await supabase.rpc('hybrid_search_resources', {
+      query_embedding: queryEmbedding,
+      query_text: query,
+      resource_type_filter: resourceType ?? null,
+      match_limit: limit,
+    });
 
-  if (error) {
-    throw new Error(`hybrid_search_resources failed: ${error.message}`);
+    if (error) {
+      console.warn(`[ragSearch] hybrid_search_resources ошибка: ${error.message}`);
+      return ftsSearchResources(query, resourceType, limit);
+    }
+
+    return ((data ?? []) as Array<{
+      id: string;
+      code: string;
+      name: string;
+      measure_unit: string | null;
+      resource_type: FsnbResourceType;
+      score: number;
+    }>).map(row => ({
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      measure_unit: row.measure_unit,
+      resource_type: row.resource_type,
+      score: row.score,
+    }));
+  } catch (e) {
+    console.warn('[ragSearch] hybrid_search_resources exception, fallback на FTS:', e);
+    return ftsSearchResources(query, resourceType, limit);
   }
-
-  return ((data ?? []) as Array<{
-    id: string;
-    code: string;
-    name: string;
-    measure_unit: string | null;
-    resource_type: FsnbResourceType;
-    score: number;
-  }>).map(row => ({
-    id: row.id,
-    code: row.code,
-    name: row.name,
-    measure_unit: row.measure_unit,
-    resource_type: row.resource_type,
-    score: row.score,
-  }));
 }
 
 // ── Exact GOST lookup ───────────────────────────────────────────
@@ -147,39 +221,45 @@ export async function searchNorms(
     limit?: number;
   },
 ): Promise<FsnbNormSearchResult[]> {
-  const { baseType, workCategory, limit = 20 } = opts ?? {};
+  const { baseType, limit = 20 } = opts ?? {};
 
-  const queryEmbedding = await embedText(query);
+  try {
+    const queryEmbedding = await embedText(query);
 
-  const { data, error } = await supabase.rpc('hybrid_search_norms', {
-    query_embedding: queryEmbedding,
-    query_text: query,
-    base_type_filter: baseType ?? null,
-    category_filter: workCategory ?? null,
-    match_limit: limit,
-  });
+    const { data, error } = await supabase.rpc('hybrid_search_norms', {
+      query_embedding: queryEmbedding,
+      query_text: query,
+      base_type_filter: baseType ?? null,
+      category_filter: null,
+      match_limit: limit,
+    });
 
-  if (error) {
-    throw new Error(`hybrid_search_norms failed: ${error.message}`);
+    if (error) {
+      console.warn(`[ragSearch] hybrid_search_norms ошибка: ${error.message}`);
+      return ftsSearchNorms(query, baseType, limit);
+    }
+
+    return ((data ?? []) as Array<{
+      id: string;
+      norm_code: string;
+      name: string;
+      measure_unit: string;
+      base_type: FsnbBaseType;
+      work_category: string | null;
+      score: number;
+    }>).map(row => ({
+      id: row.id,
+      norm_code: row.norm_code,
+      name: row.name,
+      measure_unit: row.measure_unit,
+      base_type: row.base_type,
+      work_category: row.work_category,
+      score: row.score,
+    }));
+  } catch (e) {
+    console.warn('[ragSearch] hybrid_search_norms exception, fallback на FTS:', e);
+    return ftsSearchNorms(query, baseType, limit);
   }
-
-  return ((data ?? []) as Array<{
-    id: string;
-    norm_code: string;
-    name: string;
-    measure_unit: string;
-    base_type: FsnbBaseType;
-    work_category: string | null;
-    score: number;
-  }>).map(row => ({
-    id: row.id,
-    norm_code: row.norm_code,
-    name: row.name,
-    measure_unit: row.measure_unit,
-    base_type: row.base_type,
-    work_category: row.work_category,
-    score: row.score,
-  }));
 }
 
 // ── Norm composition ────────────────────────────────────────────
@@ -357,37 +437,38 @@ export async function searchWithinTg(
 
   // 3. Гибридный поиск по всему пулу с увеличенным лимитом для последующей фильтрации
   const broadLimit = Math.max(limit * 5, 100);
-
-  const { data, error } = await supabase.rpc('hybrid_search_resources', {
-    query_embedding: queryEmbedding,
-    query_text: query,
-    resource_type_filter: null,
-    match_limit: broadLimit,
-  });
-
-  if (error) {
-    throw new Error(`searchWithinTg (hybrid_search) failed: ${error.message}`);
-  }
-
-  // 4. Фильтруем результаты — оставляем только ресурсы из техгруппы
   const allowedSet = new Set(resourceIds);
 
-  return ((data ?? []) as Array<{
-    id: string;
-    code: string;
-    name: string;
-    measure_unit: string | null;
-    resource_type: FsnbResourceType;
-    score: number;
-  }>)
-    .filter(row => allowedSet.has(row.id))
-    .slice(0, limit)
-    .map(row => ({
-      id: row.id,
-      code: row.code,
-      name: row.name,
-      measure_unit: row.measure_unit,
-      resource_type: row.resource_type,
-      score: row.score,
-    }));
+  try {
+    const { data, error } = await supabase.rpc('hybrid_search_resources', {
+      query_embedding: queryEmbedding,
+      query_text: query,
+      resource_type_filter: null,
+      match_limit: broadLimit,
+    });
+
+    if (error) {
+      console.warn(`[ragSearch] searchWithinTg hybrid ошибка: ${error.message}`);
+      // Fallback: FTS среди ресурсов ТГ напрямую
+      const ftsResults = await ftsSearchResources(query, undefined, broadLimit);
+      return ftsResults.filter(r => allowedSet.has(r.id)).slice(0, limit);
+    }
+
+    return ((data ?? []) as Array<{
+      id: string; code: string; name: string;
+      measure_unit: string | null; resource_type: FsnbResourceType;
+      score: number;
+    }>)
+      .filter(row => allowedSet.has(row.id))
+      .slice(0, limit)
+      .map(row => ({
+        id: row.id, code: row.code, name: row.name,
+        measure_unit: row.measure_unit, resource_type: row.resource_type,
+        score: row.score,
+      }));
+  } catch (e) {
+    console.warn('[ragSearch] searchWithinTg exception, fallback на FTS:', e);
+    const ftsResults = await ftsSearchResources(query, undefined, broadLimit);
+    return ftsResults.filter(r => allowedSet.has(r.id)).slice(0, limit);
+  }
 }
