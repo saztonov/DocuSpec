@@ -586,7 +586,7 @@ async function upsertCollection(
  * Reads in pages of 10 000 to avoid response size limits.
  */
 async function buildResourceCodeMap(map: Map<string, string>): Promise<void> {
-  const PAGE_SIZE = 10_000;
+  const PAGE_SIZE = 1_000;
   let from = 0;
   let hasMore = true;
 
@@ -611,7 +611,7 @@ async function buildResourceCodeMap(map: Map<string, string>): Promise<void> {
 }
 
 async function buildNormCodeMap(map: Map<string, string>): Promise<void> {
-  const PAGE_SIZE = 10_000;
+  const PAGE_SIZE = 1_000;
   let from = 0;
   let hasMore = true;
 
@@ -636,7 +636,7 @@ async function buildNormCodeMap(map: Map<string, string>): Promise<void> {
 }
 
 async function buildTgCodeMap(map: Map<string, string>): Promise<void> {
-  const PAGE_SIZE = 10_000;
+  const PAGE_SIZE = 1_000;
   let from = 0;
   let hasMore = true;
 
