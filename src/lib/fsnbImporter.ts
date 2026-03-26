@@ -767,6 +767,104 @@ async function generateEmbeddings(
   report(phase, `${label}: завершено (${processed} из ${total}).`, processed, total);
 }
 
+// ── Догрузка только norm_resources (без перезаписи норм) ─────
+
+/**
+ * Загружает norm_resources из JSON-чанков норм.
+ * Не трогает fsnb_norms — только добавляет/обновляет ресурсный состав.
+ * Использует существующие norm_code→id и resource_code→id маппинги из БД.
+ */
+export async function importNormResourcesOnly(
+  normChunks: Array<Array<{ norm_code: string; resources: Array<{ code: string; name?: string; quantity?: number; measure_unit?: string }> }>>,
+  onProgress?: ImportProgressCallback,
+): Promise<{ total: number; inserted: number; errors: number }> {
+  const report = (msg: string, current: number, total: number) => {
+    onProgress?.({ phase: 'norms', message: msg, current, total });
+  };
+
+  const allNorms = normChunks.flat();
+  const totalNorms = allNorms.length;
+  report('Построение индексов...', 0, totalNorms);
+
+  // Build maps
+  const normCodeToId = new Map<string, string>();
+  await buildNormCodeMap(normCodeToId);
+  console.log(`[fsnbImporter] normCodeToId: ${normCodeToId.size} записей`);
+
+  const resourceCodeToId = new Map<string, string>();
+  await buildResourceCodeMap(resourceCodeToId);
+  console.log(`[fsnbImporter] resourceCodeToId: ${resourceCodeToId.size} записей`);
+
+  let inserted = 0;
+  let errors = 0;
+  const DATA_BATCH = 500;
+
+  // Process in batches of 500 norms
+  const batches = chunks(allNorms, DATA_BATCH);
+
+  for (let bi = 0; bi < batches.length; bi++) {
+    const batch = batches[bi];
+
+    // Delete existing norm_resources for norms in this batch
+    const normIdsInBatch = batch
+      .map(n => normCodeToId.get(n.norm_code))
+      .filter((id): id is string => id != null);
+
+    if (normIdsInBatch.length > 0) {
+      const deleteChunks = chunks(normIdsInBatch, 200);
+      for (const dc of deleteChunks) {
+        await supabase.from('fsnb_norm_resources').delete().in('norm_id', dc);
+      }
+    }
+
+    // Build rows
+    const nrRows: Array<{
+      norm_id: string;
+      resource_code: string;
+      resource_name: string | null;
+      resource_type: string | null;
+      consumption: number | null;
+      measure_unit: string | null;
+      resource_id: string | null;
+    }> = [];
+
+    for (const norm of batch) {
+      const normId = normCodeToId.get(norm.norm_code);
+      if (!normId) continue;
+      for (const res of norm.resources) {
+        if (!res.code) continue;
+        nrRows.push({
+          norm_id: normId,
+          resource_code: res.code,
+          resource_name: res.name ?? null,
+          resource_type: guessResourceType(res.code),
+          consumption: res.quantity ?? null,
+          measure_unit: res.measure_unit ?? null,
+          resource_id: resourceCodeToId.get(res.code) ?? null,
+        });
+      }
+    }
+
+    // Insert in sub-batches
+    const subBatches = chunks(nrRows, DATA_BATCH);
+    for (const sub of subBatches) {
+      const { error } = await supabase.from('fsnb_norm_resources').insert(sub);
+      if (error) {
+        console.error(`[fsnbImporter] norm_resources batch ${bi + 1} error:`, error.message);
+        errors++;
+      } else {
+        inserted += sub.length;
+      }
+    }
+
+    const done = Math.min((bi + 1) * DATA_BATCH, totalNorms);
+    report(`Ресурсный состав: ${done} / ${totalNorms} норм (${inserted} ресурсов)`, done, totalNorms);
+  }
+
+  report(`Готово: ${inserted} ресурсов загружено, ${errors} ошибок`, totalNorms, totalNorms);
+  return { total: totalNorms, inserted, errors };
+}
+
 // ── Utility: get import stats ──────────────────────────────────
 
 export interface FsnbImportStats {

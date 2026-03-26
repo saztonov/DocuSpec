@@ -142,6 +142,35 @@ export default function FsnbTab() {
     }
   }, [jsonFiles, message, loadCollections]);
 
+  // Догрузка только norm_resources (без пересоздания норм)
+  const runNormResourcesImport = useCallback(async () => {
+    const normChunks: unknown[][] = [];
+    for (const [name, data] of Object.entries(jsonFiles)) {
+      if (name.startsWith('norms-') && name.endsWith('.json') && Array.isArray(data)) {
+        normChunks.push(data as unknown[]);
+      }
+    }
+    if (normChunks.length === 0) {
+      message.error('Загрузите JSON файлы норм (norms-*.json)');
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const { importNormResourcesOnly } = await import('../../lib/fsnbImporter.ts');
+      const result = await importNormResourcesOnly(
+        normChunks as any[][],
+        (progress) => setImportProgress(progress),
+      );
+      message.success(`Загружено ${result.inserted.toLocaleString('ru')} ресурсов для ${result.total.toLocaleString('ru')} норм. Ошибок: ${result.errors}`);
+      loadCollections();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Ошибка импорта');
+    } finally {
+      setImporting(false);
+    }
+  }, [jsonFiles, message, loadCollections]);
+
   // Search
   const handleSearch = useCallback(async (query: string) => {
     if (!query.trim()) return;
@@ -287,6 +316,15 @@ export default function FsnbTab() {
           loading={importing}
         >
           Импортировать в Supabase
+        </Button>
+
+        <Button
+          icon={<ThunderboltOutlined />}
+          onClick={runNormResourcesImport}
+          disabled={fileCount === 0 || importing}
+          loading={importing}
+        >
+          Догрузить ресурсный состав норм
         </Button>
       </Space>
 
