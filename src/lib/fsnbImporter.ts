@@ -801,10 +801,12 @@ export async function importNormResourcesOnly(
 
   let inserted = 0;
   let errors = 0;
-  const NORM_BATCH = 200;   // норм за итерацию
-  const INSERT_BATCH = 200; // строк за INSERT
+  let skippedNoId = 0;
+  const NORM_BATCH = 50;    // норм за итерацию (мелкие батчи для стабильности)
+  const INSERT_BATCH = 100; // строк за INSERT
 
   const batches = chunks(allNorms, NORM_BATCH);
+  console.log(`[fsnbImporter] Всего ${batches.length} батчей по ${NORM_BATCH} норм`);
 
   for (let bi = 0; bi < batches.length; bi++) {
     const batch = batches[bi];
@@ -815,8 +817,7 @@ export async function importNormResourcesOnly(
       .filter((id): id is string => id != null);
 
     if (normIdsInBatch.length > 0) {
-      const deleteChunks = chunks(normIdsInBatch, 100);
-      for (const dc of deleteChunks) {
+      for (const dc of chunks(normIdsInBatch, 50)) {
         await supabase.from('fsnb_norm_resources').delete().in('norm_id', dc);
       }
     }
@@ -834,7 +835,7 @@ export async function importNormResourcesOnly(
 
     for (const norm of batch) {
       const normId = normCodeToId.get(norm.norm_code);
-      if (!normId) continue;
+      if (!normId) { skippedNoId++; continue; }
       for (const res of norm.resources) {
         if (!res.code) continue;
         nrRows.push({
@@ -850,35 +851,38 @@ export async function importNormResourcesOnly(
     }
 
     // Insert in sub-batches with retry
-    const subBatches = chunks(nrRows, INSERT_BATCH);
-    for (const sub of subBatches) {
-      let retries = 0;
-      while (retries < 2) {
-        const { error } = await supabase.from('fsnb_norm_resources').insert(sub);
-        if (!error) {
-          inserted += sub.length;
-          break;
-        }
-        if (error.message?.includes('Failed to fetch') || error.message?.includes('timeout')) {
-          retries++;
-          console.warn(`[fsnbImporter] Retry ${retries} для batch ${bi + 1} (${error.message})`);
-          await new Promise(r => setTimeout(r, 2000));
-        } else {
-          console.error(`[fsnbImporter] norm_resources batch ${bi + 1} error:`, error.message);
-          errors++;
-          break;
+    for (const sub of chunks(nrRows, INSERT_BATCH)) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const { error } = await supabase.from('fsnb_norm_resources').insert(sub);
+          if (!error) {
+            inserted += sub.length;
+            break;
+          }
+          console.warn(`[fsnbImporter] batch ${bi + 1} attempt ${attempt + 1} error: ${error.message}`);
+          if (attempt < 2) await new Promise(r => setTimeout(r, 3000));
+          else errors++;
+        } catch (e) {
+          console.warn(`[fsnbImporter] batch ${bi + 1} attempt ${attempt + 1} exception:`, e);
+          if (attempt < 2) await new Promise(r => setTimeout(r, 3000));
+          else errors++;
         }
       }
     }
 
-    // Пауза между батчами
-    if (bi % 5 === 4) await new Promise(r => setTimeout(r, 100));
+    // Пауза между КАЖДЫМ батчем
+    await new Promise(r => setTimeout(r, 150));
 
-    const done = Math.min((bi + 1) * DATA_BATCH, totalNorms);
-    report(`Ресурсный состав: ${done} / ${totalNorms} норм (${inserted} ресурсов)`, done, totalNorms);
+    // Прогресс каждые 10 батчей
+    if (bi % 10 === 9 || bi === batches.length - 1) {
+      const done = Math.min((bi + 1) * NORM_BATCH, totalNorms);
+      report(`Ресурсный состав: ${done} / ${totalNorms} норм (${inserted} ресурсов, ${errors} ошибок)`, done, totalNorms);
+      console.log(`[fsnbImporter] Прогресс: batch ${bi + 1}/${batches.length}, inserted=${inserted}, errors=${errors}, skipped=${skippedNoId}`);
+    }
   }
 
-  report(`Готово: ${inserted} ресурсов загружено, ${errors} ошибок`, totalNorms, totalNorms);
+  console.log(`[fsnbImporter] ИТОГО: inserted=${inserted}, errors=${errors}, skippedNoId=${skippedNoId}`);
+  report(`Готово: ${inserted} ресурсов, ${errors} ошибок, ${skippedNoId} пропущено`, totalNorms, totalNorms);
   return { total: totalNorms, inserted, errors };
 }
 
