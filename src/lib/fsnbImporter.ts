@@ -586,77 +586,81 @@ async function upsertCollection(
  * Reads in pages of 10 000 to avoid response size limits.
  */
 async function buildResourceCodeMap(map: Map<string, string>): Promise<void> {
-  const PAGE_SIZE = 1_000;
-  let from = 0;
-  let hasMore = true;
+  // Cursor-based pagination — обходит ограничение Supabase на offset
+  let lastId = '';
+  let page = 0;
 
-  while (hasMore) {
-    const { data, error } = await supabase
+  while (true) {
+    let q = supabase
       .from('fsnb_resources')
       .select('id, code')
-      .range(from, from + PAGE_SIZE - 1);
+      .order('id')
+      .limit(1000);
+    if (lastId) q = q.gt('id', lastId);
 
-    if (error) {
-      throw new Error(`Ошибка чтения fsnb_resources для индекса: ${error.message}`);
-    }
+    const { data, error } = await q;
+    if (error) throw new Error(`Ошибка чтения fsnb_resources: ${error.message}`);
 
     const rows = data ?? [];
     for (const row of rows) {
       map.set(row.code as string, row.id as string);
     }
 
-    hasMore = rows.length === PAGE_SIZE;
-    from += PAGE_SIZE;
+    if (rows.length < 1000) break;
+    lastId = rows[rows.length - 1].id as string;
+    page++;
+    if (page % 10 === 0) await new Promise(r => setTimeout(r, 50));
   }
 }
 
 async function buildNormCodeMap(map: Map<string, string>): Promise<void> {
-  const PAGE_SIZE = 1_000;
-  let from = 0;
-  let hasMore = true;
+  let lastId = '';
+  let page = 0;
 
-  while (hasMore) {
-    const { data, error } = await supabase
+  while (true) {
+    let q = supabase
       .from('fsnb_norms')
       .select('id, norm_code')
-      .range(from, from + PAGE_SIZE - 1);
+      .order('id')
+      .limit(1000);
+    if (lastId) q = q.gt('id', lastId);
 
-    if (error) {
-      throw new Error(`Ошибка чтения fsnb_norms для индекса: ${error.message}`);
-    }
+    const { data, error } = await q;
+    if (error) throw new Error(`Ошибка чтения fsnb_norms: ${error.message}`);
 
     const rows = data ?? [];
     for (const row of rows) {
       map.set(row.norm_code as string, row.id as string);
     }
 
-    hasMore = rows.length === PAGE_SIZE;
-    from += PAGE_SIZE;
+    if (rows.length < 1000) break;
+    lastId = rows[rows.length - 1].id as string;
+    page++;
+    if (page % 10 === 0) await new Promise(r => setTimeout(r, 50));
   }
 }
 
 async function buildTgCodeMap(map: Map<string, string>): Promise<void> {
-  const PAGE_SIZE = 1_000;
-  let from = 0;
-  let hasMore = true;
+  let lastId = '';
 
-  while (hasMore) {
-    const { data, error } = await supabase
+  while (true) {
+    let q = supabase
       .from('fsnb_tech_groups')
       .select('id, tg_code')
-      .range(from, from + PAGE_SIZE - 1);
+      .order('id')
+      .limit(1000);
+    if (lastId) q = q.gt('id', lastId);
 
-    if (error) {
-      throw new Error(`Ошибка чтения fsnb_tech_groups для индекса: ${error.message}`);
-    }
+    const { data, error } = await q;
+    if (error) throw new Error(`Ошибка чтения fsnb_tech_groups: ${error.message}`);
 
     const rows = data ?? [];
     for (const row of rows) {
       map.set(row.tg_code as string, row.id as string);
     }
 
-    hasMore = rows.length === PAGE_SIZE;
-    from += PAGE_SIZE;
+    if (rows.length < 1000) break;
+    lastId = rows[rows.length - 1].id as string;
   }
 }
 
@@ -797,10 +801,10 @@ export async function importNormResourcesOnly(
 
   let inserted = 0;
   let errors = 0;
-  const DATA_BATCH = 500;
+  const NORM_BATCH = 200;   // норм за итерацию
+  const INSERT_BATCH = 200; // строк за INSERT
 
-  // Process in batches of 500 norms
-  const batches = chunks(allNorms, DATA_BATCH);
+  const batches = chunks(allNorms, NORM_BATCH);
 
   for (let bi = 0; bi < batches.length; bi++) {
     const batch = batches[bi];
@@ -811,7 +815,7 @@ export async function importNormResourcesOnly(
       .filter((id): id is string => id != null);
 
     if (normIdsInBatch.length > 0) {
-      const deleteChunks = chunks(normIdsInBatch, 200);
+      const deleteChunks = chunks(normIdsInBatch, 100);
       for (const dc of deleteChunks) {
         await supabase.from('fsnb_norm_resources').delete().in('norm_id', dc);
       }
@@ -845,17 +849,30 @@ export async function importNormResourcesOnly(
       }
     }
 
-    // Insert in sub-batches
-    const subBatches = chunks(nrRows, DATA_BATCH);
+    // Insert in sub-batches with retry
+    const subBatches = chunks(nrRows, INSERT_BATCH);
     for (const sub of subBatches) {
-      const { error } = await supabase.from('fsnb_norm_resources').insert(sub);
-      if (error) {
-        console.error(`[fsnbImporter] norm_resources batch ${bi + 1} error:`, error.message);
-        errors++;
-      } else {
-        inserted += sub.length;
+      let retries = 0;
+      while (retries < 2) {
+        const { error } = await supabase.from('fsnb_norm_resources').insert(sub);
+        if (!error) {
+          inserted += sub.length;
+          break;
+        }
+        if (error.message?.includes('Failed to fetch') || error.message?.includes('timeout')) {
+          retries++;
+          console.warn(`[fsnbImporter] Retry ${retries} для batch ${bi + 1} (${error.message})`);
+          await new Promise(r => setTimeout(r, 2000));
+        } else {
+          console.error(`[fsnbImporter] norm_resources batch ${bi + 1} error:`, error.message);
+          errors++;
+          break;
+        }
       }
     }
+
+    // Пауза между батчами
+    if (bi % 5 === 4) await new Promise(r => setTimeout(r, 100));
 
     const done = Math.min((bi + 1) * DATA_BATCH, totalNorms);
     report(`Ресурсный состав: ${done} / ${totalNorms} норм (${inserted} ресурсов)`, done, totalNorms);
