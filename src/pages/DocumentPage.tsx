@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Typography,
   Tabs,
@@ -7,43 +7,38 @@ import {
   Space,
   Spin,
   Alert,
-  Descriptions,
   Table,
   Button,
-  Progress,
   App,
-  Select,
-  Divider,
   Empty,
 } from 'antd';
 import {
   FileTextOutlined,
   ExperimentOutlined,
-  UnorderedListOutlined,
   AppstoreOutlined,
+  UnorderedListOutlined,
   WarningOutlined,
-  PlayCircleOutlined,
-  ReloadOutlined,
   SaveOutlined,
-  DownloadOutlined,
   CalculatorOutlined,
 } from '@ant-design/icons';
 import { supabase } from '../lib/supabase.ts';
 import { useBom } from '../hooks/useBom.ts';
 import { useExtraction } from '../hooks/useExtraction.ts';
 import { useProducts } from '../hooks/useProducts.ts';
-import { generateCanonicalKey } from '../lib/canonical.ts';
 import { getAvailableModels } from '../lib/models.ts';
 import BlockTableModal from '../components/BlockTableModal.tsx';
 import BlockLink from '../components/BlockLink.tsx';
-import type { DbDocument, DbDocPage, DbDocBlock, DbMaterialFact, DbBomSummary, DbProductFact } from '../types/database.ts';
+import AppHeader from '../components/layout/AppHeader.tsx';
+import HamburgerMenu from '../components/layout/HamburgerMenu.tsx';
+import MaterialsTable from '../components/MaterialsTable.tsx';
+import EstimateLinesTable from '../components/EstimateLinesTable.tsx';
+import ActionBar from '../components/ActionBar.tsx';
 import { useEstimate } from '../hooks/useEstimate.ts';
 import { useEstimatesList } from '../hooks/useEstimateData.ts';
-import EstimateProgress from '../components/estimate/EstimateProgress.tsx';
+import type { DbDocument, DbDocPage, DbDocBlock, DbMaterialFact, DbBomSummary, DbProductFact } from '../types/database.ts';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
-// ── Status color mapping ──
 const STATUS_COLOR: Record<string, string> = {
   uploaded: 'default',
   parsing: 'processing',
@@ -93,7 +88,7 @@ function ErrorBlocksAlert({ blocks }: { blocks: DbDocBlock[] }) {
   );
 }
 
-// ── BlockList ──
+// ── BlockList (for hamburger menu access) ──
 function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[] }) {
   const [selectedBlock, setSelectedBlock] = useState<DbDocBlock | null>(null);
   const pageMap = new Map(pages.map((p) => [p.id, p]));
@@ -105,10 +100,8 @@ function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[]
       block_uid: b.block_uid,
       block_type: b.block_type,
       page_no: page?.page_no ?? '-',
-      sheet_label: page?.sheet_label ?? '-',
       has_table: b.has_table,
       has_error: b.has_error,
-      error_text: b.error_text,
       section_title: b.section_title,
       content_preview: b.content.slice(0, 120) + (b.content.length > 120 ? '...' : ''),
     };
@@ -117,61 +110,14 @@ function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[]
   const blockMap = new Map(blocks.map((b) => [b.id, b]));
 
   const columns = [
-    {
-      title: '№',
-      key: 'rowNum',
-      width: 50,
-      render: (_: unknown, __: unknown, index: number) => index + 1,
-    },
-    {
-      title: 'Стр.',
-      dataIndex: 'page_no',
-      key: 'page_no',
-      width: 60,
-    },
-    {
-      title: 'Блок',
-      dataIndex: 'block_uid',
-      key: 'block_uid',
-      width: 180,
-      render: (uid: string) => <Text code>{uid}</Text>,
-    },
-    {
-      title: 'Тип',
-      dataIndex: 'block_type',
-      key: 'block_type',
-      width: 80,
-      render: (type: string) => (
-        <Tag color={type === 'TEXT' ? 'blue' : 'purple'}>{type}</Tag>
-      ),
-    },
-    {
-      title: 'Таблица',
-      dataIndex: 'has_table',
-      key: 'has_table',
-      width: 80,
-      render: (v: boolean) => (v ? <Tag color="cyan">Да</Tag> : '-'),
-    },
-    {
-      title: 'Ошибка',
-      dataIndex: 'has_error',
-      key: 'has_error',
-      width: 80,
-      render: (v: boolean) => (v ? <Tag color="red">Да</Tag> : '-'),
-    },
-    {
-      title: 'Раздел',
-      dataIndex: 'section_title',
-      key: 'section_title',
-      width: 200,
-      ellipsis: true,
-    },
-    {
-      title: 'Содержимое',
-      dataIndex: 'content_preview',
-      key: 'content_preview',
-      ellipsis: true,
-    },
+    { title: '№', key: 'rowNum', width: 50, render: (_: unknown, __: unknown, index: number) => index + 1 },
+    { title: 'Стр.', dataIndex: 'page_no', key: 'page_no', width: 60 },
+    { title: 'Блок', dataIndex: 'block_uid', key: 'block_uid', width: 180, render: (uid: string) => <Text code>{uid}</Text> },
+    { title: 'Тип', dataIndex: 'block_type', key: 'block_type', width: 80, render: (type: string) => <Tag color={type === 'TEXT' ? 'blue' : 'purple'}>{type}</Tag> },
+    { title: 'Таблица', dataIndex: 'has_table', key: 'has_table', width: 80, render: (v: boolean) => (v ? <Tag color="cyan">Да</Tag> : '-') },
+    { title: 'Ошибка', dataIndex: 'has_error', key: 'has_error', width: 80, render: (v: boolean) => (v ? <Tag color="red">Да</Tag> : '-') },
+    { title: 'Раздел', dataIndex: 'section_title', key: 'section_title', width: 200, ellipsis: true },
+    { title: 'Содержимое', dataIndex: 'content_preview', key: 'content_preview', ellipsis: true },
   ];
 
   return (
@@ -187,204 +133,12 @@ function BlockList({ pages, blocks }: { pages: DbDocPage[]; blocks: DbDocBlock[]
           style: record.has_table ? { cursor: 'pointer' } : undefined,
         })}
       />
-      {selectedBlock && (
-        <BlockTableModal block={selectedBlock} onClose={() => setSelectedBlock(null)} />
-      )}
+      {selectedBlock && <BlockTableModal block={selectedBlock} onClose={() => setSelectedBlock(null)} />}
     </>
   );
 }
 
-// ── MaterialsTab ──
-
-const KIND_LABEL: Record<string, string> = { material: 'Материал', equipment: 'Оборудование' };
-const KIND_COLOR: Record<string, string> = { material: 'blue', equipment: 'volcano' };
-const SCOPE_LABEL: Record<string, string> = { per_unit: 'На 1 изд.', total: 'Итого', unknown: '?' };
-const SCOPE_COLOR: Record<string, string> = { per_unit: 'orange', total: 'green', unknown: 'default' };
-
-function MaterialsTab({ docId }: { docId: string }) {
-  const [facts, setFacts] = useState<DbMaterialFact[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [editingKey, setEditingKey] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const [filterKind, setFilterKind] = useState<string | null>(null);
-  const [showReviewOnly, setShowReviewOnly] = useState(false);
-  const { message: msg } = App.useApp();
-
-  async function loadFacts() {
-    setLoading(true);
-    const { data } = await supabase
-      .from('material_facts')
-      .select('*')
-      .eq('doc_id', docId)
-      .order('created_at');
-    setFacts((data as DbMaterialFact[]) ?? []);
-    setLoading(false);
-  }
-
-  useEffect(() => { void loadFacts(); }, [docId]);
-
-  async function saveEdit(id: string) {
-    const newKey = generateCanonicalKey(editValue);
-    const { error } = await supabase
-      .from('material_facts')
-      .update({ canonical_name: editValue, canonical_key: newKey, updated_at: new Date().toISOString() })
-      .eq('id', id);
-    if (error) { msg.error('Ошибка сохранения'); }
-    else {
-      msg.success('Сохранено');
-      setFacts(prev => prev.map(f => f.id === id ? { ...f, canonical_name: editValue, canonical_key: newKey } : f));
-    }
-    setEditingKey(null);
-  }
-
-  const columns = [
-    { title: 'Конструкция', dataIndex: 'construction', key: 'construction', width: 150, render: (v: string | null) => v ?? '—' },
-    {
-      title: 'Материал',
-      dataIndex: 'canonical_name',
-      key: 'canonical_name',
-      width: 285,
-      render: (val: string, record: DbMaterialFact) => {
-        if (editingKey === record.id) {
-          return (
-            <Space.Compact style={{ width: '100%' }}>
-              <input
-                style={{ flex: 1, padding: '2px 8px', border: '1px solid #d9d9d9', borderRadius: 4 }}
-                value={editValue}
-                onChange={e => setEditValue(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') void saveEdit(record.id); if (e.key === 'Escape') setEditingKey(null); }}
-                autoFocus
-              />
-              <Button size="small" type="primary" onClick={() => void saveEdit(record.id)}>OK</Button>
-              <Button size="small" onClick={() => setEditingKey(null)}>✕</Button>
-            </Space.Compact>
-          );
-        }
-        return (
-          <Space size={4}>
-            {record.needs_review && <WarningOutlined style={{ color: '#faad14' }} title="Требует проверки" />}
-            <Text style={{ cursor: 'pointer' }} onClick={() => { setEditingKey(record.id); setEditValue(val || record.raw_name); }} title="Нажмите для редактирования">
-              {val || <Text type="secondary" italic>—</Text>}
-            </Text>
-          </Space>
-        );
-      },
-    },
-    { title: 'Доп. пар.', dataIndex: 'extra_params', key: 'extra_params', width: 110, render: (v: string | null) => v ?? '—' },
-    { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 55 },
-    {
-      title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 90,
-      render: (v: number | null, r: DbMaterialFact) => {
-        if (v == null) return '—';
-        const scopeTag = r.qty_scope ? <Tag color={SCOPE_COLOR[r.qty_scope]} style={{ fontSize: 10, marginLeft: 2 }}>{SCOPE_LABEL[r.qty_scope]}</Tag> : null;
-        return <span>{v}{scopeTag}</span>;
-      },
-    },
-    { title: 'Марка / ГОСТ', key: 'mark_gost', width: 130, render: (_: unknown, r: DbMaterialFact) => [r.mark, r.gost].filter(Boolean).join(' / ') || '—' },
-    {
-      title: 'Тип', dataIndex: 'kind', key: 'kind', width: 90,
-      render: (v: string) => <Tag color={KIND_COLOR[v] ?? 'default'}>{KIND_LABEL[v] ?? v}</Tag>,
-    },
-    { title: 'Блок', dataIndex: 'block_id', key: 'block_id', width: 85, render: (v: string) => v ? <BlockLink blockId={v} /> : '—' },
-    { title: 'Примечание', dataIndex: 'note', key: 'note', width: 140, render: (v: string | null) => v ?? '—' },
-    {
-      title: 'Увер.', dataIndex: 'confidence', key: 'confidence', width: 70,
-      render: (v: number) => { const pct = Math.round(v * 100); return <Tag color={pct >= 80 ? 'green' : pct >= 50 ? 'orange' : 'red'}>{pct}%</Tag>; },
-    },
-  ];
-
-  if (loading) return <Spin />;
-  if (facts.length === 0) return <Empty description="Материалы ещё не извлечены. Нажмите «Собрать ведомость»." />;
-
-  // Подсчёт статистики
-  const reviewCount = facts.filter(f => f.needs_review).length;
-  const equipmentCount = facts.filter(f => f.kind === 'equipment').length;
-  const derivedCount = facts.filter(f => f.source_section === 'assembly_total').length;
-
-  // Фильтрация
-  let filteredFacts = facts;
-  if (filterKind) filteredFacts = filteredFacts.filter(f => f.kind === filterKind);
-  if (showReviewOnly) filteredFacts = filteredFacts.filter(f => f.needs_review);
-
-  const vedomostFacts = filteredFacts.filter(f => f.source_section === 'vedomost_materialov');
-  const specFacts = filteredFacts.filter(f => f.source_section === 'spetsifikatsiya' || f.source_section === 'assembly_spec');
-  const derivedFacts = filteredFacts.filter(f => f.source_section === 'assembly_total');
-  const pirogFacts = filteredFacts.filter(f => f.source_section === 'pirog');
-  const otherFacts = filteredFacts.filter(f => !f.source_section || !['vedomost_materialov', 'spetsifikatsiya', 'assembly_spec', 'assembly_total', 'pirog'].includes(f.source_section));
-
-  function renderSection(title: string, sectionFacts: DbMaterialFact[]) {
-    if (sectionFacts.length === 0) return null;
-    const groups = new Map<string, DbMaterialFact[]>();
-    for (const f of sectionFacts) {
-      const key = f.block_id ?? 'derived';
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(f);
-    }
-    return (
-      <div style={{ marginBottom: 24 }}>
-        <Title level={5} style={{ marginBottom: 4 }}>{title} <Tag>{sectionFacts.length} поз.</Tag></Title>
-        {[...groups.entries()].map(([blockId, groupFacts], idx) => {
-          const firstFact = groupFacts[0];
-          const headerLabel = firstFact?.calc_note
-            ? <Text type="secondary" style={{ fontSize: 11 }}>Расчёт</Text>
-            : firstFact?.construction
-              ? firstFact.construction
-              : <Text type="secondary" code style={{ fontSize: 11 }}>{blockId.slice(0, 12)}…</Text>;
-          return (
-            <div key={blockId}>
-              <Divider style={{ margin: '6px 0 4px', fontSize: 12, color: '#8c8c8c' }}>
-                <Space size={4}>
-                  {headerLabel}
-                  <Tag color="default" style={{ fontSize: 11 }}>{groupFacts.length} поз.</Tag>
-                  {blockId !== 'derived' && <BlockLink blockId={blockId} />}
-                </Space>
-              </Divider>
-              <Table dataSource={groupFacts.map(f => ({ ...f, key: f.id }))} columns={columns} size="small" pagination={false} scroll={{ x: 1200 }} style={{ marginBottom: idx < groups.size - 1 ? 0 : 0 }} />
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <Space style={{ marginBottom: 12 }} wrap>
-        <Select
-          value={filterKind}
-          onChange={setFilterKind}
-          allowClear
-          placeholder="Все типы"
-          style={{ width: 160 }}
-          options={[
-            { value: 'material', label: `Материалы (${facts.filter(f => f.kind === 'material').length})` },
-            { value: 'equipment', label: `Оборудование (${equipmentCount})` },
-          ]}
-        />
-        <Button
-          type={showReviewOnly ? 'primary' : 'default'}
-          danger={showReviewOnly}
-          icon={<WarningOutlined />}
-          onClick={() => setShowReviewOnly(!showReviewOnly)}
-        >
-          Требуют проверки ({reviewCount})
-        </Button>
-        {derivedCount > 0 && (
-          <Tag color="purple">Расчётных: {derivedCount}</Tag>
-        )}
-      </Space>
-
-      {renderSection('Ведомости материалов', vedomostFacts)}
-      {renderSection('Спецификации', specFacts)}
-      {renderSection('Расчёт (assembly × ведомость)', derivedFacts)}
-      {renderSection('Пироги конструкций', pirogFacts)}
-      {renderSection('Прочее', otherFacts)}
-    </div>
-  );
-}
-
-// ── ProductsTab ──
-
+// ── ProductsTab (for hamburger menu access) ──
 const PRODUCT_KIND_LABEL: Record<string, string> = { product: 'Изделие', equipment: 'Оборудование', assembly: 'Сборка' };
 const PRODUCT_KIND_COLOR: Record<string, string> = { product: 'blue', equipment: 'volcano', assembly: 'purple' };
 
@@ -404,23 +158,14 @@ function ProductsTab({ docId }: { docId: string }) {
       render: (v: string, record: DbProductFact) => (
         <Space size={4}>
           {record.needs_review && <WarningOutlined style={{ color: '#faad14' }} title="Требует проверки" />}
-          <Text
-            style={{ cursor: 'pointer', color: filterMark === v ? '#1677ff' : undefined }}
-            onClick={() => setFilterMark((prev) => prev === v ? null : v)}
-            title="Фильтр по марке"
-          >
-            {v}
-          </Text>
+          <Text style={{ cursor: 'pointer', color: filterMark === v ? '#1677ff' : undefined }} onClick={() => setFilterMark((prev) => prev === v ? null : v)} title="Фильтр по марке">{v}</Text>
         </Space>
       ),
     },
     { title: 'Наименование', dataIndex: 'assembly_name', key: 'assembly_name', ellipsis: true, render: (v: string | null) => v ?? '—' },
     { title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 80, render: (v: number | null) => v ?? '—' },
     { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 55, render: (v: string | null) => v ?? '—' },
-    {
-      title: 'Тип', dataIndex: 'kind', key: 'kind', width: 100,
-      render: (v: string) => <Tag color={PRODUCT_KIND_COLOR[v] ?? 'default'}>{PRODUCT_KIND_LABEL[v] ?? v}</Tag>,
-    },
+    { title: 'Тип', dataIndex: 'kind', key: 'kind', width: 100, render: (v: string) => <Tag color={PRODUCT_KIND_COLOR[v] ?? 'default'}>{PRODUCT_KIND_LABEL[v] ?? v}</Tag> },
     { title: 'Доп. пар.', dataIndex: 'extra_params', key: 'extra_params', width: 110, render: (v: string | null) => v ?? '—' },
     { title: 'Описание', dataIndex: 'description', key: 'description', ellipsis: true, render: (v: string | null) => v ?? '—' },
     { title: 'Блок', dataIndex: 'block_id', key: 'block_id', width: 130, render: (v: string | null) => v ? <BlockLink blockId={v} /> : '—' },
@@ -439,29 +184,17 @@ function ProductsTab({ docId }: { docId: string }) {
           </>
         )}
         {reviewCount > 0 && (
-          <Button
-            size="small"
-            type={showReviewOnly ? 'primary' : 'default'}
-            danger={showReviewOnly}
-            icon={<WarningOutlined />}
-            onClick={() => setShowReviewOnly(!showReviewOnly)}
-          >
+          <Button size="small" type={showReviewOnly ? 'primary' : 'default'} danger={showReviewOnly} icon={<WarningOutlined />} onClick={() => setShowReviewOnly(!showReviewOnly)}>
             Требуют проверки ({reviewCount})
           </Button>
         )}
       </Space>
-      <Table
-        dataSource={filtered.map(p => ({ ...p, key: p.id }))}
-        columns={prodColumns}
-        size="small"
-        pagination={false}
-        scroll={{ x: 1000 }}
-      />
+      <Table dataSource={filtered.map(p => ({ ...p, key: p.id }))} columns={prodColumns} size="small" pagination={false} scroll={{ x: 1000 }} />
     </div>
   );
 }
 
-// ── BomView with expandable rows + CSV export + save statement ──
+// ── BomView (for hamburger menu access) ──
 function BomView({ docId, filename, modelUsed, projectId, sectionId }: { docId: string; filename: string; modelUsed?: string; projectId?: string | null; sectionId?: string | null }) {
   const { bomLines, loading, error } = useBom(docId);
   const [expandedFacts, setExpandedFacts] = useState<Map<string, DbMaterialFact[]>>(new Map());
@@ -471,25 +204,13 @@ function BomView({ docId, filename, modelUsed, projectId, sectionId }: { docId: 
 
   async function loadFactsForKey(canonicalKey: string) {
     if (expandedFacts.has(canonicalKey)) return;
-    const { data } = await supabase
-      .from('material_facts')
-      .select('*')
-      .eq('doc_id', docId)
-      .eq('canonical_key', canonicalKey)
-      .order('created_at');
+    const { data } = await supabase.from('material_facts').select('*').eq('doc_id', docId).eq('canonical_key', canonicalKey).order('created_at');
     setExpandedFacts(prev => new Map(prev).set(canonicalKey, (data as DbMaterialFact[]) ?? []));
   }
 
   function exportCsv() {
     const header = ['Канон. ключ', 'Наименование', 'Ед.', 'Итого кол-во', 'Кол-во источников'];
-    const rows = bomLines.map(b => [
-      b.canonical_key,
-      b.canonical_name,
-      b.unit ?? '',
-      b.total_qty?.toString() ?? '',
-      b.fact_count.toString(),
-    ]);
-
+    const rows = bomLines.map(b => [b.canonical_key, b.canonical_name, b.unit ?? '', b.total_qty?.toString() ?? '', b.fact_count.toString()]);
     const csv = [header, ...rows].map(r => r.map(c => `"${(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const bom = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(bom);
@@ -504,11 +225,7 @@ function BomView({ docId, filename, modelUsed, projectId, sectionId }: { docId: 
     setSaving(true);
     try {
       const baseName = filename.replace(/\.md$/i, '');
-      const { data: existing } = await supabase
-        .from('statements')
-        .select('name')
-        .like('name', `${baseName}%`);
-
+      const { data: existing } = await supabase.from('statements').select('name').like('name', `${baseName}%`);
       let name = baseName;
       if (existing && existing.length > 0) {
         const existingNames = new Set(existing.map((s: { name: string }) => s.name));
@@ -518,29 +235,11 @@ function BomView({ docId, filename, modelUsed, projectId, sectionId }: { docId: 
           name = `${baseName} (${counter})`;
         }
       }
-
-      const { data: stmt, error: stmtErr } = await supabase
-        .from('statements')
-        .insert({ doc_id: docId, name, model_used: modelUsed || null, item_count: bomLines.length, project_id: projectId ?? null, section_id: sectionId ?? null })
-        .select('id')
-        .single();
-
+      const { data: stmt, error: stmtErr } = await supabase.from('statements').insert({ doc_id: docId, name, model_used: modelUsed || null, item_count: bomLines.length, project_id: projectId ?? null, section_id: sectionId ?? null }).select('id').single();
       if (stmtErr || !stmt) throw new Error(stmtErr?.message ?? 'Ошибка создания ведомости');
-
-      const items = bomLines.map((b: DbBomSummary) => ({
-        statement_id: stmt.id,
-        canonical_key: b.canonical_key,
-        canonical_name: b.canonical_name,
-        unit: b.unit,
-        total_qty: b.total_qty,
-        fact_count: b.fact_count,
-        source_block_ids: b.source_block_ids,
-        user_verified: b.all_verified,
-      }));
-
+      const items = bomLines.map((b: DbBomSummary) => ({ statement_id: stmt.id, canonical_key: b.canonical_key, canonical_name: b.canonical_name, unit: b.unit, total_qty: b.total_qty, fact_count: b.fact_count, source_block_ids: b.source_block_ids, user_verified: b.all_verified }));
       const { error: itemsErr } = await supabase.from('statement_items').insert(items);
       if (itemsErr) throw new Error(itemsErr.message);
-
       msg.success(`Ведомость "${name}" сохранена`);
       navigate(`/statements/${stmt.id}`);
     } catch (err) {
@@ -550,65 +249,33 @@ function BomView({ docId, filename, modelUsed, projectId, sectionId }: { docId: 
     }
   }
 
-  if (error) {
-    return <Alert type="error" message="Ошибка загрузки ведомости" description={error} />;
-  }
+  if (error) return <Alert type="error" message="Ошибка загрузки ведомости" description={error} />;
 
   const BLOCK_TYPE_COLOR: Record<string, string> = { 'Таблица': 'cyan', 'Текст': 'blue', 'Изображение': 'purple' };
 
   const columns = [
-    {
-      title: '№',
-      key: 'rowNum',
-      width: 50,
-      render: (_: unknown, __: unknown, index: number) => index + 1,
-    },
+    { title: '№', key: 'rowNum', width: 50, render: (_: unknown, __: unknown, index: number) => index + 1 },
     { title: 'Наименование', dataIndex: 'canonical_name', key: 'canonical_name', ellipsis: true },
     { title: 'Канон. ключ', dataIndex: 'canonical_key', key: 'canonical_key', width: 200, ellipsis: true },
     { title: 'Ед.', dataIndex: 'unit', key: 'unit', width: 60 },
-    {
-      title: 'Итого кол-во',
-      dataIndex: 'total_qty',
-      key: 'total_qty',
-      width: 120,
-      render: (v: number | null) => v != null ? <Text strong>{v}</Text> : '-',
-    },
+    { title: 'Итого кол-во', dataIndex: 'total_qty', key: 'total_qty', width: 120, render: (v: number | null) => v != null ? <Text strong>{v}</Text> : '-' },
     { title: 'Источников', dataIndex: 'fact_count', key: 'fact_count', width: 100 },
     {
-      title: 'Тип блока',
-      dataIndex: 'source_block_display_types',
-      key: 'source_block_display_types',
-      width: 160,
+      title: 'Тип блока', dataIndex: 'source_block_display_types', key: 'source_block_display_types', width: 160,
       render: (types: string[] | null) => {
         if (!types || types.length === 0) return '—';
-        return (
-          <Space size={4} wrap>
-            {types.filter(Boolean).map(t => (
-              <Tag key={t} color={BLOCK_TYPE_COLOR[t] ?? 'default'}>{t}</Tag>
-            ))}
-          </Space>
-        );
+        return <Space size={4} wrap>{types.filter(Boolean).map(t => <Tag key={t} color={BLOCK_TYPE_COLOR[t] ?? 'default'}>{t}</Tag>)}</Space>;
       },
     },
-    {
-      title: 'Проверены',
-      dataIndex: 'all_verified',
-      key: 'all_verified',
-      width: 100,
-      render: (v: boolean) => (v ? <Tag color="green">Все</Tag> : <Tag>Нет</Tag>),
-    },
+    { title: 'Проверены', dataIndex: 'all_verified', key: 'all_verified', width: 100, render: (v: boolean) => (v ? <Tag color="green">Все</Tag> : <Tag>Нет</Tag>) },
   ];
 
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
       {bomLines.length > 0 && (
         <Space>
-          <Button icon={<SaveOutlined />} type="primary" onClick={() => void saveStatement()} loading={saving}>
-            Сохранить ведомость
-          </Button>
-          <Button onClick={exportCsv}>
-            Экспорт CSV
-          </Button>
+          <Button icon={<SaveOutlined />} type="primary" onClick={() => void saveStatement()} loading={saving}>Сохранить ведомость</Button>
+          <Button onClick={exportCsv}>Экспорт CSV</Button>
         </Space>
       )}
       <Table
@@ -638,250 +305,48 @@ function BomView({ docId, filename, modelUsed, projectId, sectionId }: { docId: 
               />
             );
           },
-          onExpand: (expanded, record) => {
-            if (expanded) void loadFactsForKey(record.canonical_key);
-          },
+          onExpand: (expanded, record) => { if (expanded) void loadFactsForKey(record.canonical_key); },
         }}
       />
     </Space>
   );
 }
 
-// ── ExtractionProgress ──
-function ExtractionProgress({ docId, onComplete, selectedModel, onModelChange }: {
-  docId: string;
-  onComplete?: () => void;
-  selectedModel: string;
-  onModelChange: (model: string) => void;
-}) {
-  const { progress, runExtraction, lastLogger } = useExtraction(docId);
-  const { message } = App.useApp();
-  const models = getAvailableModels();
-
-  const isRunning = progress.status !== 'idle' && progress.status !== 'done' && progress.status !== 'error';
-
-  async function handleStart() {
-    try {
-      await runExtraction(selectedModel || undefined);
-      message.success(`Извлечение завершено: ${progress.extractedFacts} материалов`);
-      onComplete?.();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Ошибка извлечения';
-      message.error(msg);
-    }
-  }
-
-  const phaseLabel = progress.phase ? ` — ${progress.phase}` : '';
-  const statusText: Record<string, string> = {
-    idle: 'Готов к запуску',
-    rule_based: `Извлечение из таблиц (правила)${phaseLabel}...`,
-    llm_extracting: `LLM-извлечение (${progress.completedBatches}/${progress.totalBatches})${phaseLabel}...`,
-    merging: `Объединение результатов${phaseLabel}...`,
-    saving: 'Сохранение...',
-    done: `Готово: ${progress.extractedFacts} материалов`,
-    error: progress.errorMessage ?? 'Ошибка',
-  };
-
-  const percent = progress.totalBatches > 0
-    ? Math.round((progress.completedBatches / progress.totalBatches) * 100)
-    : 0;
-
-  return (
-    <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
-      <Space>
-        {models.length > 1 && (
-          <Select
-            value={selectedModel}
-            onChange={onModelChange}
-            options={models}
-            style={{ width: 260 }}
-            disabled={isRunning}
-          />
-        )}
-        <Button
-          type="primary"
-          icon={<PlayCircleOutlined />}
-          loading={isRunning}
-          onClick={handleStart}
-          disabled={isRunning}
-        >
-          Собрать ведомость
-        </Button>
-        {progress.status === 'done' && (
-          <>
-            <Button icon={<ReloadOutlined />} onClick={handleStart}>
-              Пересобрать
-            </Button>
-            {lastLogger && (
-              <Button icon={<DownloadOutlined />} onClick={() => lastLogger.downloadLog()}>
-                Скачать лог
-              </Button>
-            )}
-          </>
-        )}
-      </Space>
-
-      {isRunning && (
-        <div>
-          <Text type="secondary">{statusText[progress.status]}</Text>
-          {(progress.status === 'llm_extracting' || progress.status === 'rule_based') && progress.totalBatches > 0 && (
-            <Progress percent={percent} size="small" style={{ marginTop: 8 }} />
-          )}
-        </div>
-      )}
-
-      {progress.status === 'done' && (
-        <>
-          <Text type="success">{statusText.done}</Text>
-          {progress.totalTokens && progress.totalTokens > 0 && (
-            <Text type="secondary" style={{ marginLeft: 8 }}>
-              | Токены: {(progress.promptTokens ?? 0).toLocaleString('ru-RU')} вход + {(progress.completionTokens ?? 0).toLocaleString('ru-RU')} выход = {progress.totalTokens.toLocaleString('ru-RU')}
-            </Text>
-          )}
-        </>
-      )}
-
-      {progress.status === 'error' && (
-        <Alert type="error" message={statusText.error} />
-      )}
-    </Space>
-  );
-}
-
 // ── Main DocumentPage ──
-function EstimateTab({ docId, docStatus, model }: { docId: string; docStatus: string; model: string }) {
-  const { progress, estimateId, runEstimate } = useEstimate(docId);
-  const { estimates, loading: listLoading, refetch } = useEstimatesList(docId);
-  const navigate = useNavigate();
-  const { message } = App.useApp();
-
-  const canRun = docStatus === 'done' && progress.status === 'idle';
-  const isRunning = progress.status !== 'idle' && progress.status !== 'done' && progress.status !== 'error';
-
-  async function handleRun() {
-    try {
-      await runEstimate(model);
-      message.success('Смета сформирована');
-      refetch();
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Ошибка');
-    }
-  }
-
-  return (
-    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-      <Space>
-        <Button
-          type="primary"
-          icon={<CalculatorOutlined />}
-          onClick={handleRun}
-          disabled={!canRun}
-          loading={isRunning}
-          size="large"
-        >
-          Составить смету
-        </Button>
-        {docStatus !== 'done' && (
-          <Tag color="orange">Сначала извлеките материалы</Tag>
-        )}
-      </Space>
-
-      {isRunning && <EstimateProgress progress={progress} />}
-
-      {progress.status === 'error' && (
-        <Alert type="error" title="Ошибка" description={progress.agentThinking} showIcon />
-      )}
-
-      {progress.status === 'done' && estimateId && (
-        <Alert
-          type="success"
-          title="Смета сформирована"
-          action={
-            <Button size="small" onClick={() => navigate(`/doc/${docId}/estimate/${estimateId}`)}>
-              Открыть смету
-            </Button>
-          }
-          showIcon
-        />
-      )}
-
-      {estimates.length > 0 && (
-        <>
-          <Divider titlePlacement="left">Существующие сметы</Divider>
-          <Table
-            size="small"
-            dataSource={estimates}
-            rowKey="id"
-            loading={listLoading}
-            pagination={false}
-            columns={[
-              { title: '№', key: 'n', width: 50, render: (_: unknown, __: unknown, i: number) => i + 1 },
-              { title: 'Название', dataIndex: 'name', key: 'name' },
-              {
-                title: 'Статус',
-                dataIndex: 'status',
-                key: 'status',
-                width: 120,
-                render: (s: string) => (
-                  <Tag color={s === 'done' ? 'green' : s === 'error' ? 'red' : 'processing'}>
-                    {s}
-                  </Tag>
-                ),
-              },
-              { title: 'Модель', dataIndex: 'model_used', key: 'model', width: 150 },
-              {
-                title: 'Дата',
-                dataIndex: 'created_at',
-                key: 'date',
-                width: 160,
-                render: (v: string) => new Date(v).toLocaleString('ru'),
-              },
-              {
-                title: '',
-                key: 'actions',
-                width: 100,
-                render: (_: unknown, record: { id: string }) => (
-                  <Button size="small" onClick={() => navigate(`/doc/${docId}/estimate/${record.id}`)}>
-                    Открыть
-                  </Button>
-                ),
-              },
-            ]}
-          />
-        </>
-      )}
-    </Space>
-  );
-}
-
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [document, setDocument] = useState<DbDocument | null>(null);
   const [pages, setPages] = useState<DbDocPage[]>([]);
   const [blocks, setBlocks] = useState<DbDocBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const models = getAvailableModels();
   const [selectedModel, setSelectedModel] = useState(models[0]?.value ?? '');
+  const { message } = App.useApp();
+
+  // Extraction & Estimate hooks
+  const { progress: extractionProgress, runExtraction, lastLogger } = useExtraction(id ?? '');
+  const { progress: estimateProgress, estimateId, runEstimate } = useEstimate(id ?? '');
+  const { estimates } = useEstimatesList(id ?? '');
+
+  const activeTab = searchParams.get('tab') || 'materials';
 
   useEffect(() => {
     if (!id) return;
-
     async function loadData() {
       setLoading(true);
       setError(null);
-
       try {
         const [docRes, pagesRes, blocksRes] = await Promise.all([
           supabase.from('documents').select('*').eq('id', id).single(),
           supabase.from('doc_pages').select('*').eq('doc_id', id).order('page_no'),
           supabase.from('doc_blocks').select('*').eq('doc_id', id),
         ]);
-
         if (docRes.error) throw new Error(docRes.error.message);
         if (pagesRes.error) throw new Error(pagesRes.error.message);
         if (blocksRes.error) throw new Error(blocksRes.error.message);
-
         setDocument(docRes.data as DbDocument);
         setPages((pagesRes.data as DbDocPage[]) ?? []);
         setBlocks((blocksRes.data as DbDocBlock[]) ?? []);
@@ -891,9 +356,27 @@ export default function DocumentPage() {
         setLoading(false);
       }
     }
-
     void loadData();
   }, [id]);
+
+  async function handleRunExtraction() {
+    try {
+      await runExtraction(selectedModel || undefined);
+      message.success(`Извлечение завершено: ${extractionProgress.extractedFacts} материалов`);
+      window.location.reload();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Ошибка извлечения');
+    }
+  }
+
+  async function handleRunEstimate() {
+    try {
+      await runEstimate(selectedModel);
+      message.success('Смета сформирована');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'Ошибка');
+    }
+  }
 
   if (loading) {
     return (
@@ -904,109 +387,89 @@ export default function DocumentPage() {
   }
 
   if (error || !document) {
-    return (
-      <Alert
-        type="error"
-        message="Ошибка"
-        description={error ?? 'Документ не найден'}
-        showIcon
-      />
-    );
+    return <Alert type="error" message="Ошибка" description={error ?? 'Документ не найден'} showIcon />;
   }
 
-  const tabItems = [
+  const latestEstimateId = estimates.length > 0 ? estimates[0].id : estimateId ?? undefined;
+
+  // Main tabs: Материалы + Смета
+  const mainTabs = [
+    {
+      key: 'materials',
+      label: <span><ExperimentOutlined /> Материалы</span>,
+      children: <MaterialsTable docId={document.id} />,
+    },
+    {
+      key: 'estimate',
+      label: <span><CalculatorOutlined /> Смета</span>,
+      children: <EstimateLinesTable docId={document.id} />,
+    },
+  ];
+
+  // Service tabs (via hamburger menu ?tab=xxx)
+  const serviceTabs = [
     {
       key: 'blocks',
-      label: (
-        <span>
-          <FileTextOutlined /> Блоки
-        </span>
-      ),
+      label: <span><FileTextOutlined /> Блоки</span>,
       children: <BlockList pages={pages} blocks={blocks} />,
     },
     {
-      key: 'materials',
-      label: (
-        <span>
-          <ExperimentOutlined /> Материалы
-        </span>
-      ),
-      children: <MaterialsTab docId={document.id} />,
-    },
-    {
       key: 'products',
-      label: (
-        <span>
-          <AppstoreOutlined /> Изделия
-        </span>
-      ),
+      label: <span><AppstoreOutlined /> Изделия</span>,
       children: <ProductsTab docId={document.id} />,
     },
     {
       key: 'bom',
-      label: (
-        <span>
-          <UnorderedListOutlined /> Сводная ведомость
-        </span>
-      ),
+      label: <span><UnorderedListOutlined /> Сводная ведомость</span>,
       children: <BomView docId={document.id} filename={document.filename} modelUsed={selectedModel} projectId={document.project_id} sectionId={document.section_id} />,
-    },
-    {
-      key: 'estimate',
-      label: (
-        <span>
-          <CalculatorOutlined /> Смета
-        </span>
-      ),
-      children: <EstimateTab docId={document.id} docStatus={document.status} model={selectedModel} />,
     },
   ];
 
-  return (
-    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-      <Title level={3}>{document.filename}</Title>
+  const isServiceTab = ['blocks', 'products', 'bom'].includes(activeTab);
+  const allTabs = isServiceTab ? [...mainTabs, ...serviceTabs] : mainTabs;
 
-      <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
-        <Descriptions.Item label="Файл">{document.filename}</Descriptions.Item>
-        <Descriptions.Item label="Статус">
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+      <AppHeader onMenuClick={() => setMenuOpen(true)} docName={document.filename} />
+      <HamburgerMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        docId={document.id}
+        latestEstimateId={latestEstimateId}
+      />
+
+      <div style={{ flex: 1, padding: '16px 24px' }}>
+        {/* Compact doc info */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
           <Tag color={STATUS_COLOR[document.status] ?? 'default'}>
             {STATUS_LABEL[document.status] ?? document.status}
           </Tag>
-        </Descriptions.Item>
-        <Descriptions.Item label="Код документа">
-          {document.doc_code ?? '-'}
-        </Descriptions.Item>
-        <Descriptions.Item label="Страниц">{document.page_count ?? 0}</Descriptions.Item>
-        <Descriptions.Item label="Блоков">{document.block_count ?? 0}</Descriptions.Item>
-        <Descriptions.Item label="Ошибок">
-          {document.error_blocks_count > 0 ? (
-            <Text type="danger">{document.error_blocks_count}</Text>
-          ) : (
-            0
-          )}
-        </Descriptions.Item>
-        {document.model_used && (
-          <Descriptions.Item label="Модель распознавания">
-            <Tag color="blue">{document.model_used}</Tag>
-          </Descriptions.Item>
-        )}
-        {document.total_tokens > 0 && (
-          <Descriptions.Item label="Токены LLM">
-            {document.prompt_tokens.toLocaleString('ru-RU')} вход + {document.completion_tokens.toLocaleString('ru-RU')} выход = {document.total_tokens.toLocaleString('ru-RU')}
-          </Descriptions.Item>
-        )}
-      </Descriptions>
+          {document.doc_code && <Text type="secondary">Код: {document.doc_code}</Text>}
+          <Text type="secondary">{document.page_count ?? 0} стр.</Text>
+          <Text type="secondary">{document.block_count ?? 0} блоков</Text>
+          {document.error_blocks_count > 0 && <Text type="danger">{document.error_blocks_count} ошибок</Text>}
+        </div>
 
-      {document.status === 'has_errors' && <ErrorBlocksAlert blocks={blocks} />}
+        {document.status === 'has_errors' && <ErrorBlocksAlert blocks={blocks} />}
 
-      <Tabs items={tabItems} defaultActiveKey="blocks" />
+        <Tabs
+          items={allTabs}
+          activeKey={activeTab}
+          onChange={(key) => setSearchParams({ tab: key })}
+        />
+      </div>
 
-      <ExtractionProgress
-        docId={document.id}
-        onComplete={() => window.location.reload()}
+      <ActionBar
+        docStatus={document.status}
         selectedModel={selectedModel}
         onModelChange={setSelectedModel}
+        extractionProgress={extractionProgress}
+        onRunExtraction={() => void handleRunExtraction()}
+        onReExtract={() => void handleRunExtraction()}
+        onDownloadLog={lastLogger ? () => lastLogger.downloadLog() : undefined}
+        estimateProgress={estimateProgress}
+        onRunEstimate={() => void handleRunEstimate()}
       />
-    </Space>
+    </div>
   );
 }
