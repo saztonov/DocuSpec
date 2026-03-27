@@ -17,14 +17,20 @@ export function useEstimate(docId: string) {
   });
   const [estimateId, setEstimateId] = useState<string | null>(null);
   const runningRef = useRef(false);
+  const abortRef = useRef(false);
+
+  const stopEstimate = useCallback(() => {
+    abortRef.current = true;
+  }, []);
 
   const runEstimate = useCallback(async (model?: string) => {
     if (runningRef.current) return;
     runningRef.current = true;
+    abortRef.current = false;
 
     try {
       setProgress({
-        status: 'preparing',
+        status: 'preparing' as EstimateProgress['status'],
         phase: 'Подготовка контекста',
         currentAgent: null,
         currentStep: 0,
@@ -38,15 +44,18 @@ export function useEstimate(docId: string) {
       const result = await runEstimatePipeline({
         docId,
         model,
-        onProgress: (p) => setProgress(p),
+        onProgress: (p: EstimateProgress) => {
+          if (abortRef.current) throw new Error('Остановлено пользователем');
+          setProgress(p);
+        },
       });
 
       setEstimateId(result.estimateId);
-      setProgress(prev => ({ ...prev, status: 'done', phase: 'Готово' }));
+      setProgress(prev => ({ ...prev, status: 'done' as EstimateProgress['status'], phase: 'Готово' }));
     } catch (err) {
       setProgress(prev => ({
         ...prev,
-        status: 'error',
+        status: 'error' as EstimateProgress['status'],
         phase: 'Ошибка',
         agentThinking: err instanceof Error ? err.message : 'Неизвестная ошибка',
       }));
@@ -55,5 +64,5 @@ export function useEstimate(docId: string) {
     }
   }, [docId]);
 
-  return { progress, estimateId, runEstimate };
+  return { progress, estimateId, runEstimate, stopEstimate };
 }

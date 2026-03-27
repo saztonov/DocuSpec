@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase.ts';
 import { parseDocument } from '../lib/parser.ts';
 import { classifyTable, isExtractableCategory, isVedomostMaterialov, isAssemblySpec } from '../lib/tableClassifier.ts';
@@ -30,8 +30,14 @@ export function useExtraction(docId: string) {
     errorMessage: null,
   });
   const [lastLogger, setLastLogger] = useState<ExtractionLogger | null>(null);
+  const abortRef = useRef(false);
+
+  const stopExtraction = useCallback(() => {
+    abortRef.current = true;
+  }, []);
 
   const runExtraction = useCallback(async (model?: string) => {
+    abortRef.current = false;
     const logger = new ExtractionLogger();
     try {
       logger.logStart();
@@ -331,6 +337,7 @@ export function useExtraction(docId: string) {
       // ════════════════════════════════════════════════════════
       // ФАЗА 1: Ведомости материалов
       // ════════════════════════════════════════════════════════
+      if (abortRef.current) throw new Error('Остановлено пользователем');
       setProgress(p => ({
         ...p, status: 'rule_based', phase: 'Фаза 1: Ведомости материалов',
         completedBatches: 0, totalBatches: vedomostBlocks.length,
@@ -392,6 +399,7 @@ export function useExtraction(docId: string) {
       // ════════════════════════════════════════════════════════
       // ФАЗА 2: Спецификации
       // ════════════════════════════════════════════════════════
+      if (abortRef.current) throw new Error('Остановлено пользователем');
       setProgress(p => ({
         ...p, status: 'llm_extracting', phase: 'Фаза 2: Спецификации',
         completedBatches: 0, totalBatches: specBlocks.length, extractedFacts: totalFacts,
@@ -474,6 +482,7 @@ export function useExtraction(docId: string) {
       // ════════════════════════════════════════════════════════
       // ФАЗА 2b: Спецификации сборок (assembly_spec)
       // ════════════════════════════════════════════════════════
+      if (abortRef.current) throw new Error('Остановлено пользователем');
       if (assemblyBlocks.length > 0) {
         setProgress(p => ({
           ...p, status: 'rule_based', phase: 'Фаза 2b: Спецификации изделий',
@@ -518,6 +527,7 @@ export function useExtraction(docId: string) {
       // ════════════════════════════════════════════════════════
       // ФАЗА 2c: Ведомости изделий → product_facts
       // ════════════════════════════════════════════════════════
+      if (abortRef.current) throw new Error('Остановлено пользователем');
       if (productListBlocks.length > 0) {
         setProgress(p => ({
           ...p, status: 'llm_extracting', phase: 'Фаза 2c: Ведомости изделий',
@@ -663,6 +673,7 @@ export function useExtraction(docId: string) {
       // ════════════════════════════════════════════════════════
       // ФАЗА 3: Пироги из изображений
       // ════════════════════════════════════════════════════════
+      if (abortRef.current) throw new Error('Остановлено пользователем');
       setProgress(p => ({
         ...p, status: 'llm_extracting', phase: 'Фаза 3: Пироги конструкций',
         completedBatches: 0, totalBatches: imageBlocks.length, extractedFacts: totalFacts,
@@ -747,7 +758,7 @@ export function useExtraction(docId: string) {
     }
   }, [docId]);
 
-  return { progress, runExtraction, lastLogger };
+  return { progress, runExtraction, stopExtraction, lastLogger };
 }
 
 /**

@@ -4,6 +4,8 @@ import { Typography, Table, Space, Button, Spin, Alert, App, Popconfirm, Tag } f
 import { DeleteOutlined, DownloadOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase.ts';
 import type { DbStatement, DbStatementItem } from '../types/database.ts';
+import AppHeader from '../components/layout/AppHeader.tsx';
+import HamburgerMenu from '../components/layout/HamburgerMenu.tsx';
 
 const { Title, Text } = Typography;
 
@@ -18,6 +20,7 @@ export default function StatementViewPage() {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editField, setEditField] = useState<string>('');
   const [editValue, setEditValue] = useState<string>('');
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -123,8 +126,15 @@ export default function StatementViewPage() {
     URL.revokeObjectURL(url);
   }
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 64 }}><Spin size="large" /></div>;
-  if (error || !statement) return <Alert type="error" message="Ошибка" description={error ?? 'Ведомость не найдена'} showIcon />;
+  const headerBlock = (
+    <>
+      <AppHeader onMenuClick={() => setMenuOpen(true)} />
+      <HamburgerMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
+    </>
+  );
+
+  if (loading) return <>{headerBlock}<div style={{ textAlign: 'center', padding: 64 }}><Spin size="large" /></div></>;
+  if (error || !statement) return <>{headerBlock}<Alert type="error" message="Ошибка" description={error ?? 'Ведомость не найдена'} showIcon style={{ margin: 24 }} /></>;
 
   const columns = [
     {
@@ -161,32 +171,37 @@ export default function StatementViewPage() {
   ];
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Space>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/statements')}>Назад</Button>
-      </Space>
+    <>
+      {headerBlock}
+      <div style={{ padding: 24 }}>
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Space>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/statements')}>Назад</Button>
+          </Space>
 
-      <Title level={3}>{statement.name}</Title>
+          <Title level={3}>{statement.name}</Title>
 
-      <Space>
-        {statement.model_used && <Tag color="blue">{statement.model_used}</Tag>}
-        <Text type="secondary">{new Date(statement.created_at).toLocaleString('ru-RU')}</Text>
-      </Space>
+          <Space>
+            {statement.model_used && <Tag color="blue">{statement.model_used}</Tag>}
+            <Text type="secondary">{new Date(statement.created_at).toLocaleString('ru-RU')}</Text>
+          </Space>
 
-      <Space>
-        <Button icon={<DownloadOutlined />} onClick={exportCsv}>Экспорт CSV</Button>
-        <Popconfirm title="Удалить ведомость?" onConfirm={() => void handleDelete()} okText="Да" cancelText="Нет">
-          <Button danger icon={<DeleteOutlined />}>Удалить</Button>
-        </Popconfirm>
-      </Space>
+          <Space>
+            <Button icon={<DownloadOutlined />} onClick={exportCsv}>Экспорт CSV</Button>
+            <Popconfirm title="Удалить ведомость?" onConfirm={() => void handleDelete()} okText="Да" cancelText="Нет">
+              <Button danger icon={<DeleteOutlined />}>Удалить</Button>
+            </Popconfirm>
+          </Space>
 
-      <Table
-        dataSource={items.map(i => ({ ...i, key: i.id }))}
-        columns={columns}
-        size="small"
-        pagination={{ defaultPageSize: 30 }}
-        locale={{ emptyText: 'Позиции отсутствуют' }}
-      />
-    </Space>
+          <Table
+            dataSource={items.map(i => ({ ...i, key: i.id }))}
+            columns={columns}
+            size="small"
+            pagination={{ defaultPageSize: 30 }}
+            locale={{ emptyText: 'Позиции отсутствуют' }}
+          />
+        </Space>
+      </div>
+    </>
   );
 }

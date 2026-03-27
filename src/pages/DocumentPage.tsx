@@ -327,8 +327,8 @@ export default function DocumentPage() {
   const { message } = App.useApp();
 
   // Extraction & Estimate hooks
-  const { progress: extractionProgress, runExtraction, lastLogger } = useExtraction(id ?? '');
-  const { progress: estimateProgress, estimateId, runEstimate } = useEstimate(id ?? '');
+  const { progress: extractionProgress, runExtraction, stopExtraction, lastLogger } = useExtraction(id ?? '');
+  const { progress: estimateProgress, estimateId, runEstimate, stopEstimate } = useEstimate(id ?? '');
   const { estimates } = useEstimatesList(id ?? '');
 
   const activeTab = searchParams.get('tab') || 'materials';
@@ -465,10 +465,12 @@ export default function DocumentPage() {
         onModelChange={setSelectedModel}
         extractionProgress={extractionProgress}
         onRunExtraction={() => void handleRunExtraction()}
+        onStopExtraction={stopExtraction}
         onReExtract={() => void handleRunExtraction()}
         onDownloadLog={lastLogger ? () => lastLogger.downloadLog() : undefined}
         estimateProgress={estimateProgress}
         onRunEstimate={() => void handleRunEstimate()}
+        onStopEstimate={stopEstimate}
       />
     </div>
   );

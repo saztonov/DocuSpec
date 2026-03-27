@@ -4,6 +4,8 @@ import { Typography, Table, Space, Button, Tag, App, Popconfirm, Collapse } from
 import { DeleteOutlined, EyeOutlined, FolderOutlined, BookOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase.ts';
 import type { DbStatement, DbProject, DbSection } from '../types/database.ts';
+import AppHeader from '../components/layout/AppHeader.tsx';
+import HamburgerMenu from '../components/layout/HamburgerMenu.tsx';
 
 const { Title, Text } = Typography;
 
@@ -72,6 +74,7 @@ function groupStatements(data: StatementWithRefs[]): ProjectGroup[] {
 export default function StatementsPage() {
   const [groups, setGroups] = useState<ProjectGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
   const { message } = App.useApp();
 
   async function loadStatements() {
@@ -156,12 +159,22 @@ export default function StatementsPage() {
     },
   ];
 
+  const headerBlock = (
+    <>
+      <AppHeader onMenuClick={() => setMenuOpen(true)} />
+      <HamburgerMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
+    </>
+  );
+
   if (loading) {
     return (
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Title level={2}>Ведомости</Title>
-        <Table loading columns={stmtColumns} dataSource={[]} size="small" />
-      </Space>
+      <>
+        {headerBlock}
+        <div style={{ padding: 24 }}>
+          <Title level={3}>Ведомости</Title>
+          <Table loading columns={stmtColumns} dataSource={[]} size="small" />
+        </div>
+      </>
     );
   }
 
@@ -169,10 +182,13 @@ export default function StatementsPage() {
 
   if (totalStatements === 0) {
     return (
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Title level={2}>Ведомости</Title>
-        <Table columns={stmtColumns} dataSource={[]} size="small" locale={{ emptyText: 'Ведомости ещё не созданы' }} />
-      </Space>
+      <>
+        {headerBlock}
+        <div style={{ padding: 24 }}>
+          <Title level={3}>Ведомости</Title>
+          <Table columns={stmtColumns} dataSource={[]} size="small" locale={{ emptyText: 'Ведомости ещё не созданы' }} />
+        </div>
+      </>
     );
   }
 
@@ -228,12 +244,15 @@ export default function StatementsPage() {
   });
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Title level={2}>Ведомости</Title>
-      <Collapse
-        items={projectItems}
-        defaultActiveKey={projectItems.map(p => p.key)}
-      />
-    </Space>
+    <>
+      {headerBlock}
+      <div style={{ padding: 24 }}>
+        <Title level={3}>Ведомости</Title>
+        <Collapse
+          items={projectItems}
+          defaultActiveKey={projectItems.map(p => p.key)}
+        />
+      </div>
+    </>
   );
 }

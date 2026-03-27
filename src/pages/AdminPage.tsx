@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Typography, Tabs, Table, Button, Space, Modal, Form, Input, InputNumber, Popconfirm, App, Tag } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons';
 import { useProjects } from '../hooks/useProjects.ts';
@@ -6,6 +7,8 @@ import { useSections } from '../hooks/useSections.ts';
 import { usePrompts } from '../hooks/usePrompts.ts';
 import type { DbProject, DbSection, DbLlmPrompt } from '../types/database.ts';
 import FsnbTab from '../components/admin/FsnbTab.tsx';
+import AppHeader from '../components/layout/AppHeader.tsx';
+import HamburgerMenu from '../components/layout/HamburgerMenu.tsx';
 
 const { Title } = Typography;
 
@@ -306,6 +309,10 @@ function PromptsTab() {
 }
 
 export default function AdminPage() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'projects';
+
   const items = [
     { key: 'projects', label: 'Объекты', children: <ProjectsTab /> },
     { key: 'sections', label: 'Разделы', children: <SectionsTab /> },
@@ -314,9 +321,13 @@ export default function AdminPage() {
   ];
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Title level={2}>Администрирование</Title>
-      <Tabs items={items} />
-    </Space>
+    <>
+      <AppHeader onMenuClick={() => setMenuOpen(true)} />
+      <HamburgerMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
+      <div style={{ padding: 24 }}>
+        <Title level={3} style={{ marginBottom: 16 }}>Администрирование</Title>
+        <Tabs items={items} activeKey={activeTab} onChange={(key) => setSearchParams({ tab: key })} />
+      </div>
+    </>
   );
 }
