@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Typography, Table, Tag, Space, Select, Empty, Spin, Button, Row, Col, Statistic, Card } from 'antd';
-import { CalculatorOutlined, ArrowRightOutlined } from '@ant-design/icons';
+import { Typography, Table, Tag, Space, Select, Empty, Spin, Button, Row, Col, Statistic, Card, Popconfirm, App } from 'antd';
+import { CalculatorOutlined, ArrowRightOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useEstimatesList } from '../hooks/useEstimateData.ts';
 import { supabase } from '../lib/supabase.ts';
@@ -9,8 +9,9 @@ import type { DbEstimateLine } from '../types/estimate.ts';
 const { Text } = Typography;
 
 export default function EstimateLinesTable({ docId }: { docId: string }) {
-  const { estimates, loading: listLoading } = useEstimatesList(docId);
+  const { estimates, loading: listLoading, refetch } = useEstimatesList(docId);
   const navigate = useNavigate();
+  const { message } = App.useApp();
   const [selectedEstimateId, setSelectedEstimateId] = useState<string | null>(null);
   const [lines, setLines] = useState<DbEstimateLine[]>([]);
   const [loadingLines, setLoadingLines] = useState(false);
@@ -53,6 +54,20 @@ export default function EstimateLinesTable({ docId }: { docId: string }) {
     );
   }
 
+  async function handleDelete(estId: string) {
+    const { error } = await supabase.from('estimates').delete().eq('id', estId);
+    if (error) {
+      message.error('Ошибка удаления сметы');
+    } else {
+      message.success('Смета удалена');
+      if (selectedEstimateId === estId) {
+        setSelectedEstimateId(null);
+        setLines([]);
+      }
+      refetch();
+    }
+  }
+
   const selectedEstimate = estimates.find(e => e.id === selectedEstimateId);
   const totalCost = lines.reduce((sum, l) => sum + (l.total_cost ?? 0), 0);
   const materialCost = lines.reduce((sum, l) => sum + (l.material_cost ?? 0), 0);
@@ -93,18 +108,17 @@ export default function EstimateLinesTable({ docId }: { docId: string }) {
         </Col>
       </Row>
 
-      <Space style={{ marginBottom: 12 }}>
-        {estimates.length > 1 && (
-          <Select
-            value={selectedEstimateId}
-            onChange={setSelectedEstimateId}
-            style={{ width: 300 }}
-            options={estimates.map(e => ({
-              value: e.id,
-              label: `${e.name ?? 'Смета'} — ${new Date(e.created_at).toLocaleDateString('ru-RU')}`,
-            }))}
-          />
-        )}
+      <Space style={{ marginBottom: 12 }} wrap>
+        <Select
+          value={selectedEstimateId}
+          onChange={setSelectedEstimateId}
+          style={{ minWidth: 300 }}
+          popupMatchSelectWidth={false}
+          options={estimates.map(e => ({
+            value: e.id,
+            label: `${e.name ?? 'Смета'} — ${new Date(e.created_at).toLocaleString('ru-RU')}`,
+          }))}
+        />
         {selectedEstimate && (
           <Tag color={selectedEstimate.status === 'done' ? 'green' : selectedEstimate.status === 'error' ? 'red' : 'processing'}>
             {selectedEstimate.status}
@@ -118,6 +132,17 @@ export default function EstimateLinesTable({ docId }: { docId: string }) {
           >
             Подробнее
           </Button>
+        )}
+        {selectedEstimateId && (
+          <Popconfirm
+            title="Удалить смету?"
+            description="Будут удалены все данные этой сметы."
+            onConfirm={() => void handleDelete(selectedEstimateId)}
+            okText="Да"
+            cancelText="Нет"
+          >
+            <Button danger size="small" icon={<DeleteOutlined />}>Удалить</Button>
+          </Popconfirm>
         )}
       </Space>
 
