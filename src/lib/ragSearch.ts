@@ -7,6 +7,7 @@
 
 import { supabase } from '../lib/supabase';
 import { callEmbeddingApi } from '../lib/llm';
+import { enqueueDb } from './requestQueue';
 import type {
   FsnbSearchResult,
   FsnbNormSearchResult,
@@ -58,11 +59,6 @@ export async function embedBatch(
     results.push(...embeddings);
 
     onProgress?.(Math.min(i + batchSize, total), total);
-
-    // Задержка между пакетами, чтобы не упереться в rate-limit
-    if (i + batchSize < total) {
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
   }
 
   return results;
@@ -95,57 +91,59 @@ async function ftsSearchResources(
   resourceType?: string,
   limit = 20,
 ): Promise<FsnbSearchResult[]> {
-  const ftsQuery = buildFtsQuery(query);
-  console.log(`[ragSearch] FTS ресурсов: "${ftsQuery}" (из "${query}")`);
+  return enqueueDb(async () => {
+    const ftsQuery = buildFtsQuery(query);
+    console.log(`[ragSearch] FTS ресурсов: "${ftsQuery}" (из "${query}")`);
 
-  let q = supabase
-    .from('fsnb_resources')
-    .select('id, code, name, measure_unit, resource_type')
-    .textSearch('search_text', ftsQuery, { type: 'plain', config: 'russian' })
-    .limit(limit);
+    let q = supabase
+      .from('fsnb_resources')
+      .select('id, code, name, measure_unit, resource_type')
+      .textSearch('search_text', ftsQuery, { type: 'plain', config: 'russian' })
+      .limit(limit);
 
-  if (resourceType) q = q.eq('resource_type', resourceType);
+    if (resourceType) q = q.eq('resource_type', resourceType);
 
-  const { data, error } = await q;
+    const { data, error } = await q;
 
-  // Если FTS не нашёл — пробуем ilike по первому слову
-  if ((!data || data.length === 0) && !error) {
-    const mainWord = query.split(/\s+/).sort((a, b) => b.length - a.length)[0];
-    if (mainWord && mainWord.length > 3) {
-      console.log(`[ragSearch] FTS пусто, пробуем ilike "%${mainWord}%"`);
-      let q2 = supabase
-        .from('fsnb_resources')
-        .select('id, code, name, measure_unit, resource_type')
-        .ilike('name', `%${mainWord}%`)
-        .limit(limit);
-      if (resourceType) q2 = q2.eq('resource_type', resourceType);
-      const { data: d2 } = await q2;
-      if (d2 && d2.length > 0) {
-        return (d2 as Array<{
-          id: string; code: string; name: string;
-          measure_unit: string | null; resource_type: FsnbResourceType;
-        }>).map((row, i) => ({
-          id: row.id, code: row.code, name: row.name,
-          measure_unit: row.measure_unit, resource_type: row.resource_type,
-          score: 0.5 / (1 + i),
-        }));
+    // Если FTS не нашёл — пробуем ilike по первому слову
+    if ((!data || data.length === 0) && !error) {
+      const mainWord = query.split(/\s+/).sort((a, b) => b.length - a.length)[0];
+      if (mainWord && mainWord.length > 3) {
+        console.log(`[ragSearch] FTS пусто, пробуем ilike "%${mainWord}%"`);
+        let q2 = supabase
+          .from('fsnb_resources')
+          .select('id, code, name, measure_unit, resource_type')
+          .ilike('name', `%${mainWord}%`)
+          .limit(limit);
+        if (resourceType) q2 = q2.eq('resource_type', resourceType);
+        const { data: d2 } = await q2;
+        if (d2 && d2.length > 0) {
+          return (d2 as Array<{
+            id: string; code: string; name: string;
+            measure_unit: string | null; resource_type: FsnbResourceType;
+          }>).map((row, i) => ({
+            id: row.id, code: row.code, name: row.name,
+            measure_unit: row.measure_unit, resource_type: row.resource_type,
+            score: 0.5 / (1 + i),
+          }));
+        }
       }
     }
-  }
 
-  if (error) {
-    console.error('[ragSearch] FTS ресурсов ошибка:', error.message);
-    return [];
-  }
+    if (error) {
+      console.error('[ragSearch] FTS ресурсов ошибка:', error.message);
+      return [];
+    }
 
-  return ((data ?? []) as Array<{
-    id: string; code: string; name: string;
-    measure_unit: string | null; resource_type: FsnbResourceType;
-  }>).map((row, i) => ({
-    id: row.id, code: row.code, name: row.name,
-    measure_unit: row.measure_unit, resource_type: row.resource_type,
-    score: 1 / (1 + i),
-  }));
+    return ((data ?? []) as Array<{
+      id: string; code: string; name: string;
+      measure_unit: string | null; resource_type: FsnbResourceType;
+    }>).map((row, i) => ({
+      id: row.id, code: row.code, name: row.name,
+      measure_unit: row.measure_unit, resource_type: row.resource_type,
+      score: 1 / (1 + i),
+    }));
+  });
 }
 
 /**
@@ -156,59 +154,61 @@ async function ftsSearchNorms(
   baseType?: string,
   limit = 20,
 ): Promise<FsnbNormSearchResult[]> {
-  const ftsQuery = buildFtsQuery(query);
-  console.log(`[ragSearch] FTS норм: "${ftsQuery}" (из "${query}")`);
+  return enqueueDb(async () => {
+    const ftsQuery = buildFtsQuery(query);
+    console.log(`[ragSearch] FTS норм: "${ftsQuery}" (из "${query}")`);
 
-  let q = supabase
-    .from('fsnb_norms')
-    .select('id, norm_code, name, measure_unit, base_type, work_category')
-    .textSearch('search_text', ftsQuery, { type: 'plain', config: 'russian' })
-    .limit(limit);
+    let q = supabase
+      .from('fsnb_norms')
+      .select('id, norm_code, name, measure_unit, base_type, work_category')
+      .textSearch('search_text', ftsQuery, { type: 'plain', config: 'russian' })
+      .limit(limit);
 
-  if (baseType) q = q.eq('base_type', baseType);
+    if (baseType) q = q.eq('base_type', baseType);
 
-  const { data, error } = await q;
+    const { data, error } = await q;
 
-  // Если FTS не нашёл — пробуем ilike
-  if ((!data || data.length === 0) && !error) {
-    const mainWord = query.split(/\s+/).sort((a, b) => b.length - a.length)[0];
-    if (mainWord && mainWord.length > 3) {
-      console.log(`[ragSearch] FTS норм пусто, пробуем ilike "%${mainWord}%"`);
-      let q2 = supabase
-        .from('fsnb_norms')
-        .select('id, norm_code, name, measure_unit, base_type, work_category')
-        .ilike('name', `%${mainWord}%`)
-        .limit(limit);
-      if (baseType) q2 = q2.eq('base_type', baseType);
-      const { data: d2 } = await q2;
-      if (d2 && d2.length > 0) {
-        return (d2 as Array<{
-          id: string; norm_code: string; name: string;
-          measure_unit: string; base_type: FsnbBaseType;
-          work_category: string | null;
-        }>).map((row, i) => ({
-          id: row.id, norm_code: row.norm_code, name: row.name,
-          measure_unit: row.measure_unit, base_type: row.base_type,
-          work_category: row.work_category, score: 0.5 / (1 + i),
-        }));
+    // Если FTS не нашёл — пробуем ilike
+    if ((!data || data.length === 0) && !error) {
+      const mainWord = query.split(/\s+/).sort((a, b) => b.length - a.length)[0];
+      if (mainWord && mainWord.length > 3) {
+        console.log(`[ragSearch] FTS норм пусто, пробуем ilike "%${mainWord}%"`);
+        let q2 = supabase
+          .from('fsnb_norms')
+          .select('id, norm_code, name, measure_unit, base_type, work_category')
+          .ilike('name', `%${mainWord}%`)
+          .limit(limit);
+        if (baseType) q2 = q2.eq('base_type', baseType);
+        const { data: d2 } = await q2;
+        if (d2 && d2.length > 0) {
+          return (d2 as Array<{
+            id: string; norm_code: string; name: string;
+            measure_unit: string; base_type: FsnbBaseType;
+            work_category: string | null;
+          }>).map((row, i) => ({
+            id: row.id, norm_code: row.norm_code, name: row.name,
+            measure_unit: row.measure_unit, base_type: row.base_type,
+            work_category: row.work_category, score: 0.5 / (1 + i),
+          }));
+        }
       }
     }
-  }
 
-  if (error) {
-    console.error('[ragSearch] FTS норм ошибка:', error.message);
-    return [];
-  }
+    if (error) {
+      console.error('[ragSearch] FTS норм ошибка:', error.message);
+      return [];
+    }
 
-  return ((data ?? []) as Array<{
-    id: string; norm_code: string; name: string;
-    measure_unit: string; base_type: FsnbBaseType;
-    work_category: string | null;
-  }>).map((row, i) => ({
-    id: row.id, norm_code: row.norm_code, name: row.name,
-    measure_unit: row.measure_unit, base_type: row.base_type,
-    work_category: row.work_category, score: 1 / (1 + i),
-  }));
+    return ((data ?? []) as Array<{
+      id: string; norm_code: string; name: string;
+      measure_unit: string; base_type: FsnbBaseType;
+      work_category: string | null;
+    }>).map((row, i) => ({
+      id: row.id, norm_code: row.norm_code, name: row.name,
+      measure_unit: row.measure_unit, base_type: row.base_type,
+      work_category: row.work_category, score: 1 / (1 + i),
+    }));
+  });
 }
 
 // ── Hybrid search: resources ────────────────────────────────────
@@ -235,12 +235,14 @@ export async function searchResources(
   try {
     const queryEmbedding = await embedText(query);
 
-    const { data, error } = await supabase.rpc('hybrid_search_resources', {
-      query_embedding: queryEmbedding,
-      query_text: query,
-      resource_type_filter: resourceType ?? null,
-      match_limit: limit,
-    });
+    const { data, error } = await enqueueDb(() =>
+      supabase.rpc('hybrid_search_resources', {
+        query_embedding: queryEmbedding,
+        query_text: query,
+        resource_type_filter: resourceType ?? null,
+        match_limit: limit,
+      }),
+    );
 
     if (error) {
       console.warn(`[ragSearch] hybrid_search_resources ошибка: ${error.message}`);
@@ -326,13 +328,15 @@ export async function searchNorms(
   try {
     const queryEmbedding = await embedText(query);
 
-    const { data, error } = await supabase.rpc('hybrid_search_norms', {
-      query_embedding: queryEmbedding,
-      query_text: query,
-      base_type_filter: baseType ?? null,
-      category_filter: null,
-      match_limit: limit,
-    });
+    const { data, error } = await enqueueDb(() =>
+      supabase.rpc('hybrid_search_norms', {
+        query_embedding: queryEmbedding,
+        query_text: query,
+        base_type_filter: baseType ?? null,
+        category_filter: null,
+        match_limit: limit,
+      }),
+    );
 
     if (error) {
       console.warn(`[ragSearch] hybrid_search_norms ошибка: ${error.message}`);

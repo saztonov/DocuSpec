@@ -807,7 +807,7 @@ function EstimateTab({ docId, docStatus, model }: { docId: string; docStatus: st
 
       {estimates.length > 0 && (
         <>
-          <Divider orientation="left">Существующие сметы</Divider>
+          <Divider titlePlacement="left">Существующие сметы</Divider>
           <Table
             size="small"
             dataSource={estimates}
@@ -963,7 +963,7 @@ export default function DocumentPage() {
   ];
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Title level={3}>{document.filename}</Title>
 
       <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>

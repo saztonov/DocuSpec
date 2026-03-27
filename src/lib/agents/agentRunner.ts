@@ -6,11 +6,18 @@
  * When the LLM returns tool_calls the runner executes them, appends tool
  * results to the conversation, and continues. The loop ends when the LLM
  * returns a final text answer (end_turn) or the step budget is exhausted.
+ *
+ * Features:
+ * - Tool call cache (shared across agents in a pipeline run)
+ * - Anti-looping detection (warns after 3 consecutive cache hits)
+ * - Step budget warning on penultimate step
+ * - Graceful handling of malformed tool arguments
  */
 
 import { callLlmWithTools } from '../llm.ts';
 import type { LlmMessage, ToolDefinition, ToolCall } from '../llm.ts';
 import type { AgentTool, AgentConfig, AgentStep, AgentResult } from '../../types/skills.ts';
+import { ToolCallCache } from './toolCallCache.ts';
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -59,6 +66,12 @@ export interface AgentRunnerConfig extends AgentConfig {
   onStep?: (step: AgentStep) => void;
 }
 
+/** Options passed to runAgent */
+export interface RunAgentOptions {
+  /** Shared tool call cache (across agents in a pipeline run) */
+  toolCache?: ToolCallCache;
+}
+
 // ── Main runner ────────────────────────────────────────────────
 
 /**
@@ -66,16 +79,19 @@ export interface AgentRunnerConfig extends AgentConfig {
  *
  * @param config  Agent configuration (system prompt, tools, limits).
  * @param userMessage  The user task / query string.
+ * @param options  Optional settings (shared tool cache, etc.)
  * @returns `AgentResult` containing the final answer, step log, and usage.
  */
 export async function runAgent(
   config: AgentRunnerConfig,
   userMessage: string,
+  options?: RunAgentOptions,
 ): Promise<AgentResult> {
   const toolDefs = toToolDefinitions(config.tools);
   const toolMap = new Map<string, AgentTool>(
     config.tools.map((t) => [t.name, t]),
   );
+  const toolCache = options?.toolCache;
 
   // Build initial message history
   const messages: (LlmMessage | { role: 'tool'; tool_call_id: string; content: string })[] = [
@@ -91,6 +107,7 @@ export async function runAgent(
   };
 
   let lastThinking: string | null = null;
+  let consecutiveCacheHits = 0;
 
   console.group(`🤖 [Agent: ${config.name}] старт`);
   console.log('Задание:', truncate(userMessage));
@@ -100,6 +117,23 @@ export async function runAgent(
   for (let stepNum = 1; stepNum <= config.maxSteps; stepNum++) {
     const stepStart = Date.now();
     console.log(`\n── Шаг ${stepNum}/${config.maxSteps} ──`);
+
+    // ── Step budget warning on penultimate step ──────────────────
+    if (stepNum === config.maxSteps - 1) {
+      messages.push({
+        role: 'system',
+        content: `⚠️ ВНИМАНИЕ: Это предпоследний шаг (${stepNum}/${config.maxSteps}). Если вы нашли подходящую норму/ресурс — ОБЯЗАТЕЛЬНО вызовите confirm_rate или confirm_match прямо сейчас. Если не нашли — верните финальный JSON-ответ с reasoning, объясняющим почему норма/ресурс не найден. НЕ делайте ещё один search.`,
+      } as unknown as LlmMessage);
+    }
+
+    // ── Anti-looping warning ────────────────────────────────────
+    if (consecutiveCacheHits >= 3) {
+      messages.push({
+        role: 'system',
+        content: '⚠️ Вы повторяете одни и те же поисковые запросы. Все варианты уже перебраны. Примите решение на основе имеющихся данных: вызовите confirm_rate/confirm_match с лучшим найденным вариантом, или верните финальный JSON-ответ с объяснением.',
+      } as unknown as LlmMessage);
+      consecutiveCacheHits = 0; // reset to avoid spamming
+    }
 
     // Call LLM with current conversation + tool definitions
     const response = await callLlmWithTools({
@@ -151,6 +185,7 @@ export async function runAgent(
 
       // Execute each tool call
       const stepCalls: AgentStep['toolCalls'] = [];
+      let stepCacheHits = 0;
 
       for (const toolCall of response.tool_calls) {
         const tool = toolMap.get(toolCall.function.name);
@@ -158,19 +193,38 @@ export async function runAgent(
 
         let output: unknown;
         const toolStart = Date.now();
+
         if (!tool) {
           output = { error: `Неизвестный инструмент: ${toolCall.function.name}` };
           console.error(`  ❌ Tool "${toolCall.function.name}" не найден`);
+        } else if (typeof parsedInput === 'string' && tool.parameters && Object.keys(tool.parameters).length > 0) {
+          // ── Malformed JSON arguments ──────────────────────────
+          output = { error: `Невалидные аргументы (не удалось распарсить JSON). Получено: "${truncate(parsedInput, 100)}". Повторите вызов с корректным JSON.` };
+          console.error(`  ❌ ${toolCall.function.name}: битый JSON аргументов`);
         } else {
-          console.log(`  🔧 ${toolCall.function.name}(${truncate(parsedInput, 150)})`);
-          try {
-            output = await tool.execute(parsedInput);
-            console.log(`     → ${truncate(output, 200)} (${Date.now() - toolStart}ms)`);
-          } catch (err) {
-            output = {
-              error: err instanceof Error ? err.message : String(err),
-            };
-            console.error(`     ❌ Ошибка: ${(output as { error: string }).error}`);
+          // ── Check cache ──────────────────────────────────────
+          const cached = toolCache?.get(toolCall.function.name, parsedInput);
+          if (cached) {
+            output = cached.output;
+            stepCacheHits++;
+            console.log(`  📋 ${toolCall.function.name}(${truncate(parsedInput, 150)}) [КЭШИРОВАНО, агент: ${cached.agentName}, шаг: ${cached.stepNumber}]`);
+          } else {
+            console.log(`  🔧 ${toolCall.function.name}(${truncate(parsedInput, 150)})`);
+            try {
+              output = await tool.execute(parsedInput);
+              console.log(`     → ${truncate(output, 200)} (${Date.now() - toolStart}ms)`);
+              // Save to cache
+              toolCache?.set(toolCall.function.name, parsedInput, {
+                output,
+                agentName: config.name,
+                stepNumber: stepNum,
+              });
+            } catch (err) {
+              output = {
+                error: err instanceof Error ? err.message : String(err),
+              };
+              console.error(`     ❌ Ошибка: ${(output as { error: string }).error}`);
+            }
           }
         }
 
@@ -179,6 +233,13 @@ export async function runAgent(
           input: parsedInput,
           output,
         });
+      }
+
+      // Track consecutive cache hits for anti-looping
+      if (stepCacheHits > 0 && stepCacheHits === response.tool_calls.length) {
+        consecutiveCacheHits++;
+      } else {
+        consecutiveCacheHits = 0;
       }
 
       // Append assistant message (with tool_calls) to conversation.
@@ -201,10 +262,17 @@ export async function runAgent(
       for (let i = 0; i < response.tool_calls.length; i++) {
         const tc = response.tool_calls[i];
         const result = stepCalls[i].output;
+        let content = JSON.stringify(result);
+
+        // Add cache hint to tool response so LLM knows it's a duplicate
+        if (toolCache?.get(tc.function.name, stepCalls[i].input)) {
+          content += '\n\n[КЭШИРОВАНО — этот запрос уже выполнялся ранее с идентичным результатом. Попробуйте другой запрос или примите решение на имеющихся данных.]';
+        }
+
         messages.push({
           role: 'tool' as never,
           tool_call_id: tc.id,
-          content: JSON.stringify(result),
+          content,
         } as never);
       }
 

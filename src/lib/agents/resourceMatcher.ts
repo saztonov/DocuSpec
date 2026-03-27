@@ -73,7 +73,15 @@ const SYSTEM_PROMPT = `Ты — специалист по сопоставлен
 }
 \`\`\`
 
-Не добавляй текст вне JSON.`;
+Не добавляй текст вне JSON.
+
+## Важные правила
+
+- Если ресурс не найден после 3 попыток поиска — пропустите этот материал. НЕ пытайтесь подставить вымышленный resource_id.
+- НИКОГДА не используйте fact_id как resource_id в confirm_match.
+- НИКОГДА не используйте UUID вида 00000000-0000-0000-0000-000000000000.
+- НЕ повторяйте одинаковые поисковые запросы — если запрос уже выполнялся, попробуйте другую формулировку или пропустите материал.
+- НИКОГДА не возвращайте пустой ответ. Всегда возвращайте JSON с результатами.`;
 
 // ── Таблица совместимости единиц ─────────────────────────────────
 
@@ -419,6 +427,17 @@ function buildTools(estimateId: string): AgentTool[] {
       };
 
       const needsReview = confidence < 0.6 || unit_compatible === false;
+
+      // Validate resource_id exists in fsnb_resources
+      const { data: resCheck } = await supabase
+        .from('fsnb_resources')
+        .select('id')
+        .eq('id', resource_id)
+        .maybeSingle();
+
+      if (!resCheck) {
+        return { error: `resource_id "${resource_id}" не найден в fsnb_resources. Если ресурс не найден в базе — пропустите этот материал, не вызывайте confirm_match.` };
+      }
 
       const { data, error } = await supabase
         .from('estimate_resource_matches')

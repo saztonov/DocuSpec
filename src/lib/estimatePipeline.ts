@@ -12,6 +12,7 @@
 
 import { supabase } from './supabase.ts';
 import type { EstimateProgress } from '../types/estimate.ts';
+import { ToolCallCache } from './agents/toolCallCache.ts';
 
 /** Убирает markdown code block обёртку (```json ... ```) из ответа LLM */
 function stripMarkdownJson(text: string): string {
@@ -153,6 +154,9 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     const { createWorkClassifierConfig } = await import('./agents/workClassifier.ts');
     const { runAgent } = await import('./agents/agentRunner.ts');
 
+    // Shared tool call cache across all agents in this pipeline run
+    const toolCache = new ToolCallCache();
+
     const wcConfig = createWorkClassifierConfig({ model });
     const groupsPayload = Array.from(groups.entries()).map(([construction, facts]) => ({
       construction: construction === '__no_construction__' ? null : construction,
@@ -169,7 +173,7 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
       doc_code: doc.doc_code,
       section_code: sectionCode,
       groups: groupsPayload.slice(0, 20), // Limit groups to prevent token overflow
-    }));
+    }), { toolCache });
 
     // Parse and save work items
     let workItemsCount = 0;
@@ -237,13 +241,20 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
           work_description: wi.work_description,
           work_category: wi.work_category,
           materials: wiMaterials,
-        }));
+        }), { toolCache });
         console.log(`[estimate] PricePicker ответ (${wi.work_description}):`, ppResult.finalAnswer?.slice(0, 300));
+
+        // Считаем успехом только если есть реальный ответ (не пустой)
+        const answer = ppResult.finalAnswer?.trim();
+        if (!answer || answer === '' || answer.startsWith('[Лимит шагов')) {
+          console.warn(`[estimate] ⚠️ PricePicker для "${wi.work_description}": пустой или неполный ответ`);
+          continue;
+        }
 
         // Результат сохраняется через confirm_rate tool внутри агента
         // Но на случай если агент вернул в финальном ответе:
         try {
-          const parsed = JSON.parse(stripMarkdownJson(ppResult.finalAnswer));
+          const parsed = JSON.parse(stripMarkdownJson(answer));
           if (parsed.norm_code && !parsed.saved) {
             await supabase.from('estimate_rate_matches').insert({
               estimate_id: estimateId,
@@ -262,8 +273,6 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
       } catch (err) {
         console.error(`[estimate] ❌ PricePicker ошибка для "${wi.work_description}":`, err);
       }
-
-      await new Promise(r => setTimeout(r, 300));
     }
 
     progress(onProgress, { agentThinking: `Подобрано ${rateMatchesCount} расценок` });
@@ -284,32 +293,56 @@ export async function runEstimatePipeline(options: PipelineOptions): Promise<Pip
     let resourceMatchesCount = 0;
     // Process in batches of 10 materials
     const batchSize = 10;
+
+    /** Run a single ResourceMatcher batch */
+    async function runRmBatch(batch: typeof materialFacts, batchLabel: string): Promise<boolean> {
+      console.log(`[estimate] ResourceMatcher ${batchLabel}: ${batch.map(f => f.canonical_name || f.raw_name).join(', ').slice(0, 200)}`);
+      const rmResult = await runAgent(rmConfig, JSON.stringify({
+        estimate_id: estimateId,
+        materials: batch.map(f => ({
+          id: f.id,
+          name: f.canonical_name || f.raw_name,
+          gost: f.gost,
+          mark: f.mark,
+          unit: f.unit,
+          quantity: f.quantity,
+        })),
+      }), { toolCache });
+      const answer = rmResult.finalAnswer?.trim();
+      console.log(`[estimate] ResourceMatcher ${batchLabel} ответ:`, answer?.slice(0, 300));
+      if (!answer || answer === '') {
+        console.warn(`[estimate] ⚠️ ResourceMatcher ${batchLabel}: пустой ответ`);
+        return false;
+      }
+      return true;
+    }
+
     for (let i = 0; i < materialFacts.length; i += batchSize) {
       const batch = materialFacts.slice(i, i + batchSize);
-      console.log(`[estimate] ResourceMatcher batch ${i / batchSize + 1}: ${batch.map(f => f.canonical_name || f.raw_name).join(', ').slice(0, 200)}`);
+      const batchNum = i / batchSize + 1;
       try {
-        const rmResult = await runAgent(rmConfig, JSON.stringify({
-          estimate_id: estimateId,
-          materials: batch.map(f => ({
-            id: f.id,
-            name: f.canonical_name || f.raw_name,
-            gost: f.gost,
-            mark: f.mark,
-            unit: f.unit,
-            quantity: f.quantity,
-          })),
-        }));
-        console.log(`[estimate] ResourceMatcher batch ${i / batchSize + 1} ответ:`, rmResult.finalAnswer?.slice(0, 300));
-        // Results saved via confirm_match tool
-        resourceMatchesCount += batch.length;
+        const success = await runRmBatch(batch, `batch ${batchNum}`);
+        if (success) resourceMatchesCount += batch.length;
       } catch (err) {
-        console.error(`[estimate] ❌ ResourceMatcher ошибка batch ${i / batchSize + 1}:`, err);
+        console.error(`[estimate] ❌ ResourceMatcher ошибка batch ${batchNum}:`, err);
+        // Retry с половинным батчем
+        if (batch.length > 1) {
+          const half = Math.ceil(batch.length / 2);
+          console.log(`[estimate] Retry batch ${batchNum}: разбиваем на 2 подбатча по ${half}`);
+          for (const subBatch of [batch.slice(0, half), batch.slice(half)]) {
+            try {
+              const success = await runRmBatch(subBatch, `batch ${batchNum} (retry, ${subBatch.length} мат.)`);
+              if (success) resourceMatchesCount += subBatch.length;
+            } catch (retryErr) {
+              console.error(`[estimate] ❌ ResourceMatcher retry ошибка:`, retryErr);
+            }
+          }
+        }
       }
 
       progress(onProgress, {
         agentThinking: `Сопоставлено ${Math.min(i + batchSize, materialFacts.length)}/${materialFacts.length} материалов`,
       });
-      await new Promise(r => setTimeout(r, 300));
     }
 
     // ── Phase E: Сборка позиций сметы ──────────────────────────

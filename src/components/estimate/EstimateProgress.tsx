@@ -91,7 +91,7 @@ export default function EstimateProgress({ progress }: Props) {
         <Alert
           type="info"
           showIcon={false}
-          message={
+          title={
             <Text type="secondary" style={{ fontSize: 13, fontStyle: 'italic' }}>
               {progress.currentAgent && (
                 <Text strong style={{ fontSize: 13 }}>
