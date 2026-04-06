@@ -1,4 +1,4 @@
-import { Button, Progress, Select, Space, Typography, Tag } from 'antd';
+import { Button, Progress, Select, Space, Typography, Tag, Tooltip } from 'antd';
 import { ExperimentOutlined, CalculatorOutlined, ReloadOutlined, DownloadOutlined, StopOutlined } from '@ant-design/icons';
 import { getAvailableModels } from '../lib/models.ts';
 import type { ExtractionProgress } from '../types/extraction.ts';
@@ -178,7 +178,11 @@ export default function ActionBar({
         )}
 
         {extractionProgress.status === 'error' && (
-          <Tag color="red">Ошибка: {extractionProgress.errorMessage?.slice(0, 40) ?? 'извлечение'}</Tag>
+          <Tooltip title={extractionProgress.errorMessage} placement="topRight">
+            <Tag color="red" style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'help' }}>
+              Ошибка: {extractionProgress.errorMessage ?? 'извлечение'}
+            </Tag>
+          </Tooltip>
         )}
 
         {estimateProgress.status === 'done' && (
@@ -186,7 +190,11 @@ export default function ActionBar({
         )}
 
         {estimateProgress.status === 'error' && (
-          <Tag color="red">Ошибка: {estimateProgress.agentThinking?.slice(0, 40) ?? 'смета'}</Tag>
+          <Tooltip title={estimateProgress.agentThinking} placement="topRight">
+            <Tag color="red" style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'help' }}>
+              Ошибка: {estimateProgress.agentThinking ?? 'смета'}
+            </Tag>
+          </Tooltip>
         )}
       </div>
     </div>

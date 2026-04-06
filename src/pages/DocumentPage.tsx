@@ -365,6 +365,7 @@ export default function DocumentPage() {
       message.success(`Извлечение завершено: ${extractionProgress.extractedFacts} материалов`);
       window.location.reload();
     } catch (err) {
+      console.error('[DocuSpec] handleRunExtraction error:', err);
       message.error(err instanceof Error ? err.message : 'Ошибка извлечения');
     }
   }
@@ -374,6 +375,7 @@ export default function DocumentPage() {
       await runEstimate(selectedModel);
       message.success('Смета сформирована');
     } catch (err) {
+      console.error('[DocuSpec] handleRunEstimate error:', err);
       message.error(err instanceof Error ? err.message : 'Ошибка');
     }
   }

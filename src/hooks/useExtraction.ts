@@ -39,8 +39,20 @@ export function useExtraction(docId: string) {
   const runExtraction = useCallback(async (model?: string) => {
     abortRef.current = false;
     const logger = new ExtractionLogger();
+
+    function updateProgress(updater: (p: ExtractionProgress) => ExtractionProgress) {
+      setProgress(prev => {
+        const next = updater(prev);
+        if (next.phase !== prev.phase || next.status !== prev.status) {
+          console.log(`[DocuSpec:Extraction] ${next.status} | ${next.phase ?? ''} | batches: ${next.completedBatches}/${next.totalBatches} | facts: ${next.extractedFacts}`);
+        }
+        return next;
+      });
+    }
+
     try {
       logger.logStart();
+      console.log('[DocuSpec:Extraction] Начало извлечения, модель:', model ?? 'default');
 
       await supabase
         .from('documents')
@@ -80,7 +92,7 @@ export function useExtraction(docId: string) {
       logger.logPrompts({ universal: universalPrompt, layerCake: layerCakePrompt, glossary: glossaryPrompt });
 
       // ── Загрузить документ и section.code ──
-      setProgress(p => ({ ...p, status: 'rule_based', phase: 'Загрузка документа', errorMessage: null }));
+      updateProgress(p => ({ ...p, status: 'rule_based', phase: 'Загрузка документа', errorMessage: null }));
 
       const { data: doc, error: docError } = await supabase
         .from('documents')
@@ -145,7 +157,7 @@ export function useExtraction(docId: string) {
       // ════════════════════════════════════════════════════════
       // PASS 0: Глоссарий
       // ════════════════════════════════════════════════════════
-      setProgress(p => ({ ...p, status: 'glossary', phase: 'Pass 0: Глоссарий', completedBatches: 0, totalBatches: 1 }));
+      updateProgress(p => ({ ...p, status: 'glossary', phase: 'Pass 0: Глоссарий', completedBatches: 0, totalBatches: 1 }));
 
       const glossaryMap: GlossaryMap = new Map();
 
@@ -196,7 +208,7 @@ export function useExtraction(docId: string) {
         logger.logGlossaryResult(glossaryChunks.length, glossaryItems.length, byType);
       }
 
-      setProgress(p => ({ ...p, completedBatches: 1 }));
+      updateProgress(p => ({ ...p, completedBatches: 1 }));
 
       // ── Классифицировать все блоки ──
       const vedomostBlocks: BlockForExtraction[] = [];    // Фаза 1: ведомости материалов
@@ -338,7 +350,7 @@ export function useExtraction(docId: string) {
       // ФАЗА 1: Ведомости материалов
       // ════════════════════════════════════════════════════════
       if (abortRef.current) throw new Error('Остановлено пользователем');
-      setProgress(p => ({
+      updateProgress(p => ({
         ...p, status: 'rule_based', phase: 'Фаза 1: Ведомости материалов',
         completedBatches: 0, totalBatches: vedomostBlocks.length,
       }));
@@ -360,7 +372,7 @@ export function useExtraction(docId: string) {
 
       let phase1LlmFacts = 0;
       if (vedomostNeedingLlm.length > 0) {
-        setProgress(p => ({
+        updateProgress(p => ({
           ...p, status: 'llm_extracting', phase: 'Фаза 1: Ведомости материалов (LLM)',
           completedBatches: 0, totalBatches: vedomostNeedingLlm.length, extractedFacts: totalFacts,
         }));
@@ -371,7 +383,7 @@ export function useExtraction(docId: string) {
         const llmVedomost = await llmExtractBatch(
           vedomostNeedingLlm,
           promptWithGlossary1,
-          (completed, total) => setProgress(p => ({ ...p, completedBatches: completed, totalBatches: total })),
+          (completed, total) => updateProgress(p => ({ ...p, completedBatches: completed, totalBatches: total })),
           model,
           logger,
           'Фаза 1',
@@ -400,7 +412,7 @@ export function useExtraction(docId: string) {
       // ФАЗА 2: Спецификации
       // ════════════════════════════════════════════════════════
       if (abortRef.current) throw new Error('Остановлено пользователем');
-      setProgress(p => ({
+      updateProgress(p => ({
         ...p, status: 'llm_extracting', phase: 'Фаза 2: Спецификации',
         completedBatches: 0, totalBatches: specBlocks.length, extractedFacts: totalFacts,
       }));
@@ -439,13 +451,13 @@ export function useExtraction(docId: string) {
         const llmSpec = await llmExtractBatch(
           specNeedingLlm,
           buildPromptWithGlossary(universalPrompt, glossaryMap),
-          (completed, total) => setProgress(p => ({ ...p, completedBatches: completed, totalBatches: total })),
+          (completed, total) => updateProgress(p => ({ ...p, completedBatches: completed, totalBatches: total })),
           model,
           logger,
           'Фаза 2',
         );
 
-        setProgress(p => ({ ...p, status: 'merging', phase: 'Фаза 2: Сохранение спецификаций' }));
+        updateProgress(p => ({ ...p, status: 'merging', phase: 'Фаза 2: Сохранение спецификаций' }));
 
         for (const [blockDbId, llmItems] of llmSpec) {
           const filtered = filterLlmItemsWithLog(llmItems, blockDbId, 'Фаза 2', logger);
@@ -484,7 +496,7 @@ export function useExtraction(docId: string) {
       // ════════════════════════════════════════════════════════
       if (abortRef.current) throw new Error('Остановлено пользователем');
       if (assemblyBlocks.length > 0) {
-        setProgress(p => ({
+        updateProgress(p => ({
           ...p, status: 'rule_based', phase: 'Фаза 2b: Спецификации изделий',
           completedBatches: 0, totalBatches: assemblyBlocks.length, extractedFacts: totalFacts,
         }));
@@ -529,7 +541,7 @@ export function useExtraction(docId: string) {
       // ════════════════════════════════════════════════════════
       if (abortRef.current) throw new Error('Остановлено пользователем');
       if (productListBlocks.length > 0) {
-        setProgress(p => ({
+        updateProgress(p => ({
           ...p, status: 'llm_extracting', phase: 'Фаза 2c: Ведомости изделий',
           completedBatches: 0, totalBatches: productListBlocks.length, extractedFacts: totalFacts,
         }));
@@ -579,7 +591,7 @@ export function useExtraction(docId: string) {
       // ДВИЖОК УМНОЖЕНИЯ: assembly_spec × vedomost_izdelij
       // ════════════════════════════════════════════════════════
       if (assemblyBlocks.length > 0 && productListBlocks.length > 0) {
-        setProgress(p => ({
+        updateProgress(p => ({
           ...p, status: 'merging', phase: 'Умножение: состав изделий × ведомость',
         }));
 
@@ -674,7 +686,7 @@ export function useExtraction(docId: string) {
       // ФАЗА 3: Пироги из изображений
       // ════════════════════════════════════════════════════════
       if (abortRef.current) throw new Error('Остановлено пользователем');
-      setProgress(p => ({
+      updateProgress(p => ({
         ...p, status: 'llm_extracting', phase: 'Фаза 3: Пироги конструкций',
         completedBatches: 0, totalBatches: imageBlocks.length, extractedFacts: totalFacts,
       }));
@@ -695,7 +707,7 @@ export function useExtraction(docId: string) {
           phase3Facts += filtered.length;
         }
 
-        setProgress(p => ({ ...p, completedBatches: i + 1, extractedFacts: totalFacts }));
+        updateProgress(p => ({ ...p, completedBatches: i + 1, extractedFacts: totalFacts }));
 
         if (i < imageBlocks.length - 1) {
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -712,7 +724,7 @@ export function useExtraction(docId: string) {
       logger.addMaterialFacts(phase3Facts);
 
       // ── Финализация ──
-      setProgress(p => ({ ...p, status: 'saving', phase: 'Сохранение' }));
+      updateProgress(p => ({ ...p, status: 'saving', phase: 'Сохранение' }));
 
       const tokens = logger.getTokenUsage();
 
@@ -727,6 +739,7 @@ export function useExtraction(docId: string) {
         .eq('id', docId);
 
       const totalBlocks = vedomostBlocks.length + specBlocks.length + assemblyBlocks.length + productListBlocks.length + imageBlocks.length;
+      console.log(`[DocuSpec:Extraction] Завершено: ${totalFacts} материалов из ${totalBlocks} блоков, токены: ${tokens.total_tokens}`);
       setProgress({
         status: 'done',
         phase: undefined,
@@ -745,10 +758,11 @@ export function useExtraction(docId: string) {
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Extraction failed';
-      console.error('[DocuSpec] Ошибка извлечения:', message);
+      console.error('[DocuSpec:Extraction] Ошибка извлечения:', err);
+      if (err instanceof Error && err.stack) console.error('[DocuSpec:Extraction] Stack:', err.stack);
       logger.logSessionInit(docId, 'error', model || 'unknown');
       logger.logLlmError('global', 'extraction', 'init', message, '', '');
-      setProgress(p => ({ ...p, status: 'error', errorMessage: message }));
+      updateProgress(p => ({ ...p, status: 'error', errorMessage: message }));
       await supabase
         .from('documents')
         .update({ status: 'error', error_message: message })

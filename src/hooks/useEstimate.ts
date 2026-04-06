@@ -29,6 +29,7 @@ export function useEstimate(docId: string) {
     abortRef.current = false;
 
     try {
+      console.log('[DocuSpec:Estimate] Начало формирования сметы, модель:', model ?? 'default');
       setProgress({
         status: 'preparing' as EstimateProgress['status'],
         phase: 'Подготовка контекста',
@@ -51,8 +52,11 @@ export function useEstimate(docId: string) {
       });
 
       setEstimateId(result.estimateId);
+      console.log('[DocuSpec:Estimate] Смета сформирована, id:', result.estimateId);
       setProgress(prev => ({ ...prev, status: 'done' as EstimateProgress['status'], phase: 'Готово' }));
     } catch (err) {
+      console.error('[DocuSpec:Estimate] Ошибка формирования сметы:', err);
+      if (err instanceof Error && err.stack) console.error('[DocuSpec:Estimate] Stack:', err.stack);
       setProgress(prev => ({
         ...prev,
         status: 'error' as EstimateProgress['status'],
