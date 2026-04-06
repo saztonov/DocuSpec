@@ -5,43 +5,43 @@ import type { FsnbCollectionInfo } from '../../lib/fsnbExplorer';
 
 interface Props {
   collections: FsnbCollectionInfo[];
-  enabledCodes: Set<string>;
-  onChange: (codes: Set<string>) => void;
+  enabledIds: Set<string>;
+  onChange: (ids: Set<string>) => void;
 }
 
 export default function FsnbCollectionsFilter({
   collections,
-  enabledCodes,
+  enabledIds,
   onChange,
 }: Props) {
   const [open, setOpen] = useState(false);
-  const [localCodes, setLocalCodes] = useState<Set<string>>(enabledCodes);
+  const [localIds, setLocalIds] = useState<Set<string>>(enabledIds);
 
   useEffect(() => {
-    setLocalCodes(enabledCodes);
-  }, [enabledCodes]);
+    setLocalIds(enabledIds);
+  }, [enabledIds]);
 
   const total = collections.length;
-  const selected = localCodes.size;
+  const selected = localIds.size;
   const allSelected = selected === total && total > 0;
 
-  const toggle = (code: string) => {
-    const next = new Set(localCodes);
-    if (next.has(code)) next.delete(code);
-    else next.add(code);
-    setLocalCodes(next);
+  const toggle = (id: string) => {
+    const next = new Set(localIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setLocalIds(next);
     onChange(next);
   };
 
   const selectAll = () => {
-    const next = new Set(collections.map(c => c.code));
-    setLocalCodes(next);
+    const next = new Set(collections.map(c => c.id));
+    setLocalIds(next);
     onChange(next);
   };
 
   const clearAll = () => {
     const next = new Set<string>();
-    setLocalCodes(next);
+    setLocalIds(next);
     onChange(next);
   };
 
@@ -61,9 +61,9 @@ export default function FsnbCollectionsFilter({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {collections.map(c => (
           <Checkbox
-            key={c.code}
-            checked={localCodes.has(c.code)}
-            onChange={() => toggle(c.code)}
+            key={c.id}
+            checked={localIds.has(c.id)}
+            onChange={() => toggle(c.id)}
           >
             <Typography.Text code style={{ marginRight: 4 }}>
               {c.code}

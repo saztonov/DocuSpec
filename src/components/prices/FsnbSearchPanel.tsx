@@ -38,6 +38,7 @@ interface Props {
 type SearchMode = 'norms' | 'resources';
 
 interface EnrichedNorm extends FsnbNormSearchResult {
+  collection_id: string | null;
   collection_code: string | null;
   collection_name: string | null;
   division_code: string | null;
@@ -50,19 +51,19 @@ interface EnrichedResource extends FsnbSearchResult {
   part_name: string | null;
   section_name: string | null;
   group_name: string | null;
-  collection_code: string | null;
+  collection_id: string | null;
 }
 
-function loadEnabled(allCodes: string[]): Set<string> {
+function loadEnabled(allIds: string[]): Set<string> {
   try {
     const raw = localStorage.getItem(LS_COLLECTIONS);
-    if (!raw) return new Set(allCodes);
+    if (!raw) return new Set(allIds);
     const arr = JSON.parse(raw) as string[];
     const set = new Set(arr);
     // если в localStorage пусто — считаем «все»
-    return set.size === 0 ? new Set(allCodes) : set;
+    return set.size === 0 ? new Set(allIds) : set;
   } catch {
-    return new Set(allCodes);
+    return new Set(allIds);
   }
 }
 
@@ -92,7 +93,7 @@ export default function FsnbSearchPanel({
 }: Props) {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<SearchMode>('norms');
-  const [enabledCodes, setEnabledCodes] = useState<Set<string>>(new Set());
+  const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set());
   const [showRelations, setShowRelations] = useState<boolean>(loadShowRelations());
 
   const [normResults, setNormResults] = useState<EnrichedNorm[]>([]);
@@ -102,12 +103,12 @@ export default function FsnbSearchPanel({
   // Инициализация набора сборников при загрузке списка
   useEffect(() => {
     if (collections.length === 0) return;
-    setEnabledCodes(loadEnabled(collections.map(c => c.code)));
+    setEnabledIds(loadEnabled(collections.map(c => c.id)));
   }, [collections]);
 
-  const handleCollectionsChange = (codes: Set<string>) => {
-    setEnabledCodes(codes);
-    saveEnabled(codes);
+  const handleCollectionsChange = (ids: Set<string>) => {
+    setEnabledIds(ids);
+    saveEnabled(ids);
   };
 
   const handleShowRelationsChange = (v: boolean) => {
@@ -124,7 +125,9 @@ export default function FsnbSearchPanel({
 
   const runSearch = useCallback(
     async (q: string, m: SearchMode) => {
-      if (!q.trim() && scope.kind === null) {
+      const hasQuery = q.trim().length > 0;
+      const hasScope = scope.kind !== null;
+      if (!hasQuery && !hasScope) {
         setNormResults([]);
         setResourceResults([]);
         return;
@@ -132,30 +135,39 @@ export default function FsnbSearchPanel({
       setLoading(true);
       try {
         if (m === 'norms') {
-          // Если есть scope-фильтр по таблице/разделу — берём напрямую из БД
-          if (scope.kind === 'table' || scope.kind === 'division' || scope.kind === 'collection') {
+          if (
+            scope.kind === 'table' ||
+            scope.kind === 'division' ||
+            scope.kind === 'collection'
+          ) {
             const enriched = await fetchNormsByScope(scope, q);
-            setNormResults(filterByCollection(enriched, enabledCodes));
-          } else {
+            setNormResults(filterByCollection(enriched, enabledIds));
+          } else if (hasQuery) {
             const raw = await searchNorms(q, { limit: 30 });
             const enriched = await enrichNorms(raw);
-            setNormResults(filterByCollection(enriched, enabledCodes));
+            setNormResults(filterByCollection(enriched, enabledIds));
+          } else {
+            setNormResults([]);
           }
         } else {
           if (scope.kind === 'tg') {
             const enriched = await fetchResourcesByTg(scope.tg_id ?? '', q);
             setResourceResults(enriched);
-          } else {
+          } else if (hasQuery) {
             const raw = await searchResources(q, { limit: 30 });
             const enriched = await enrichResources(raw);
             setResourceResults(enriched);
+          } else {
+            setResourceResults([]);
           }
         }
+      } catch (err) {
+        console.error('[FsnbSearchPanel] runSearch error:', err);
       } finally {
         setLoading(false);
       }
     },
-    [enabledCodes, scope],
+    [enabledIds, scope],
   );
 
   // Дебаунс при наборе текста
@@ -171,7 +183,7 @@ export default function FsnbSearchPanel({
   }, [query, mode, scope]);
 
   const allCollectionsSelected =
-    collections.length > 0 && enabledCodes.size === collections.length;
+    collections.length > 0 && enabledIds.size === collections.length;
 
   const scopeBadge = useMemo(() => {
     if (scope.kind === null) return null;
@@ -208,7 +220,7 @@ export default function FsnbSearchPanel({
           />
           <FsnbCollectionsFilter
             collections={collections}
-            enabledCodes={enabledCodes}
+            enabledIds={enabledIds}
             onChange={handleCollectionsChange}
           />
         </Space>
@@ -223,7 +235,7 @@ export default function FsnbSearchPanel({
           </Space>
           {!allCollectionsSelected && collections.length > 0 && (
             <Typography.Text type="warning" style={{ fontSize: 12 }}>
-              Фильтр по сборникам активен ({enabledCodes.size}/{collections.length})
+              Фильтр по сборникам активен ({enabledIds.size}/{collections.length})
             </Typography.Text>
           )}
           {scopeBadge}
@@ -364,11 +376,12 @@ async function enrichNorms(items: FsnbNormSearchResult[]): Promise<EnrichedNorm[
   const ids = items.map(i => i.id);
   const { data } = await supabase
     .from('fsnb_norms')
-    .select('id, collection_code, collection_name, division_code, division_name, table_code')
+    .select('id, collection_id, collection_code, collection_name, division_code, division_name, table_code')
     .in('id', ids);
   const meta = new Map<string, Partial<EnrichedNorm>>();
   for (const row of data ?? []) {
     meta.set(row.id as string, {
+      collection_id: row.collection_id as string | null,
       collection_code: row.collection_code as string | null,
       collection_name: row.collection_name as string | null,
       division_code: row.division_code as string | null,
@@ -378,6 +391,7 @@ async function enrichNorms(items: FsnbNormSearchResult[]): Promise<EnrichedNorm[
   }
   return items.map(i => ({
     ...i,
+    collection_id: null,
     collection_code: null,
     collection_name: null,
     division_code: null,
@@ -403,7 +417,7 @@ async function enrichResources(
       part_name: row.part_name as string | null,
       section_name: row.section_name as string | null,
       group_name: row.group_name as string | null,
-      collection_code: null,
+      collection_id: row.collection_id as string | null,
     });
   }
   return items.map(i => ({
@@ -412,7 +426,7 @@ async function enrichResources(
     part_name: null,
     section_name: null,
     group_name: null,
-    collection_code: null,
+    collection_id: null,
     ...(meta.get(i.id) ?? {}),
   }));
 }
@@ -420,7 +434,7 @@ async function enrichResources(
 function filterByCollection(items: EnrichedNorm[], enabled: Set<string>): EnrichedNorm[] {
   if (enabled.size === 0) return items;
   return items.filter(
-    i => i.collection_code === null || enabled.has(i.collection_code),
+    i => i.collection_id === null || enabled.has(i.collection_id),
   );
 }
 
@@ -430,14 +444,17 @@ async function fetchNormsByScope(
   scope: ScopeSelection,
   q: string,
 ): Promise<EnrichedNorm[]> {
+  // Без collection_id фильтр по collection_code не индексирован → таймаут.
+  if (!scope.collection_id) return [];
+
   let query = supabase
     .from('fsnb_norms')
     .select(
-      'id, norm_code, name, measure_unit, base_type, work_category, collection_code, collection_name, division_code, division_name, table_code',
+      'id, norm_code, name, measure_unit, base_type, work_category, collection_id, collection_code, collection_name, division_code, division_name, table_code',
     )
+    .eq('collection_id', scope.collection_id)
     .limit(100);
 
-  if (scope.collection_code) query = query.eq('collection_code', scope.collection_code);
   if (scope.division_code) query = query.eq('division_code', scope.division_code);
   if (scope.table_code) query = query.eq('table_code', scope.table_code);
   if (q.trim()) {
@@ -457,6 +474,7 @@ async function fetchNormsByScope(
     base_type: r.base_type as EnrichedNorm['base_type'],
     work_category: r.work_category as string | null,
     score: 1 / (1 + i),
+    collection_id: r.collection_id as string | null,
     collection_code: r.collection_code as string | null,
     collection_name: r.collection_name as string | null,
     division_code: r.division_code as string | null,
@@ -500,6 +518,6 @@ async function fetchResourcesByTg(
     part_name: r.part_name as string | null,
     section_name: r.section_name as string | null,
     group_name: r.group_name as string | null,
-    collection_code: null,
+    collection_id: null,
   }));
 }

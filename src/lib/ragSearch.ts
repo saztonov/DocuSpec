@@ -227,6 +227,8 @@ export async function searchResources(
 ): Promise<FsnbSearchResult[]> {
   const { resourceType, limit = 20 } = opts ?? {};
 
+  if (!query || !query.trim()) return [];
+
   // Если hybrid отключён — сразу FTS, без ожидания timeout
   if (hybridSearchDisabled) {
     return ftsSearchResources(query, resourceType, limit);
@@ -319,6 +321,8 @@ export async function searchNorms(
   },
 ): Promise<FsnbNormSearchResult[]> {
   const { baseType, limit = 20 } = opts ?? {};
+
+  if (!query || !query.trim()) return [];
 
   // Если hybrid отключён — сразу FTS
   if (hybridSearchDisabled) {

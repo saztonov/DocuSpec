@@ -14,6 +14,7 @@ import {
 export interface ScopeSelection {
   kind: 'norm' | 'tg' | 'tg-resource' | 'collection' | 'division' | 'table' | null;
   // Для фильтрации/контекста
+  collection_id?: string | null;
   collection_code?: string | null;
   division_code?: string | null;
   table_code?: string | null;
@@ -30,6 +31,7 @@ interface Props {
 interface ExtNode extends DataNode {
   level: TreeLevel | 'norm' | 'tg-resource';
   ctx: {
+    collection_id?: string | null;
     collection_code?: string | null;
     division_code?: string | null;
     table_code?: string | null;
@@ -63,6 +65,7 @@ function toTreeNode(n: TreeNode): ExtNode {
     isLeaf: n.isLeaf,
     level: n.level,
     ctx: {
+      collection_id: n.collection_id,
       collection_code: n.collection_code,
       division_code: n.division_code,
       table_code: n.table_code,
@@ -141,6 +144,7 @@ export default function FsnbTreePanel({ onSelect }: Props) {
       case 'collection':
         onSelect({
           kind: 'collection',
+          collection_id: n.ctx.collection_id,
           collection_code: n.ctx.collection_code,
           label,
         });
@@ -148,6 +152,7 @@ export default function FsnbTreePanel({ onSelect }: Props) {
       case 'division':
         onSelect({
           kind: 'division',
+          collection_id: n.ctx.collection_id,
           collection_code: n.ctx.collection_code,
           division_code: n.ctx.division_code,
           label,
@@ -156,6 +161,7 @@ export default function FsnbTreePanel({ onSelect }: Props) {
       case 'table':
         onSelect({
           kind: 'table',
+          collection_id: n.ctx.collection_id,
           collection_code: n.ctx.collection_code,
           division_code: n.ctx.division_code,
           table_code: n.ctx.table_code,

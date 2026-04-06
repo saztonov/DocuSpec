@@ -221,6 +221,7 @@ export interface TreeNode {
   level: TreeLevel | 'norm' | 'tg-resource';
   isLeaf: boolean;
   // Контекст для последующих запросов
+  collection_id?: string | null;
   collection_code?: string | null;
   division_code?: string | null;
   table_code?: string | null;
@@ -237,6 +238,7 @@ export interface TreeNode {
 export async function getTreeChildren(
   level: TreeLevel,
   parent: {
+    collection_id?: string | null;
     collection_code?: string | null;
     division_code?: string | null;
     table_code?: string | null;
@@ -245,24 +247,24 @@ export async function getTreeChildren(
 ): Promise<TreeNode[]> {
   switch (level) {
     case 'collections-root': {
-      // Корневые сборники из fsnb_norms (distinct collection_code)
+      // Корневые сборники
       const collections = await listCollections();
-      // Берём только те, для которых есть нормы
       return collections.map(c => ({
-        key: `col:${c.code}`,
+        key: `col:${c.id}`,
         title: `${c.code} — ${c.name}`,
         level: 'collection' as const,
         isLeaf: false,
+        collection_id: c.id,
         collection_code: c.code,
       }));
     }
 
     case 'collection': {
-      // Разделы внутри сборника
+      // Разделы внутри сборника (по collection_id — индексированный FK)
       const { data, error } = await supabase
         .from('fsnb_norms')
         .select('division_code, division_name')
-        .eq('collection_code', parent.collection_code ?? '')
+        .eq('collection_id', parent.collection_id ?? '')
         .not('division_code', 'is', null)
         .limit(2000);
 
@@ -280,10 +282,11 @@ export async function getTreeChildren(
       return [...seen.entries()]
         .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([code, name]) => ({
-          key: `div:${parent.collection_code}:${code}`,
+          key: `div:${parent.collection_id}:${code}`,
           title: `${code} — ${name}`,
           level: 'division' as const,
           isLeaf: false,
+          collection_id: parent.collection_id,
           collection_code: parent.collection_code,
           division_code: code,
         }));
@@ -294,7 +297,7 @@ export async function getTreeChildren(
       const { data, error } = await supabase
         .from('fsnb_norms')
         .select('table_code, table_name')
-        .eq('collection_code', parent.collection_code ?? '')
+        .eq('collection_id', parent.collection_id ?? '')
         .eq('division_code', parent.division_code ?? '')
         .not('table_code', 'is', null)
         .limit(2000);
@@ -313,10 +316,11 @@ export async function getTreeChildren(
       return [...seen.entries()]
         .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([code, name]) => ({
-          key: `tbl:${parent.collection_code}:${parent.division_code}:${code}`,
+          key: `tbl:${parent.collection_id}:${parent.division_code}:${code}`,
           title: `${code} — ${name}`,
           level: 'table' as const,
           isLeaf: false,
+          collection_id: parent.collection_id,
           collection_code: parent.collection_code,
           division_code: parent.division_code,
           table_code: code,
@@ -328,7 +332,7 @@ export async function getTreeChildren(
       const { data, error } = await supabase
         .from('fsnb_norms')
         .select('id, norm_code, name')
-        .eq('collection_code', parent.collection_code ?? '')
+        .eq('collection_id', parent.collection_id ?? '')
         .eq('division_code', parent.division_code ?? '')
         .eq('table_code', parent.table_code ?? '')
         .order('norm_code')
