@@ -4,13 +4,13 @@ import {
   Radio,
   Switch,
   Space,
+  Flex,
   Typography,
   List,
   Tag,
   Card,
   Empty,
   Spin,
-  Button,
   Progress,
 } from 'antd';
 import { SearchOutlined, CloseOutlined } from '@ant-design/icons';
@@ -33,6 +33,7 @@ interface Props {
   onClearScope: () => void;
   onSelectNorm: (id: string) => void;
   onSelectResource: (id: string) => void;
+  onResultsCleared: () => void;
 }
 
 type SearchMode = 'norms' | 'resources';
@@ -90,6 +91,7 @@ export default function FsnbSearchPanel({
   onClearScope,
   onSelectNorm,
   onSelectResource,
+  onResultsCleared,
 }: Props) {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<SearchMode>('norms');
@@ -130,6 +132,7 @@ export default function FsnbSearchPanel({
       if (!hasQuery && !hasScope) {
         setNormResults([]);
         setResourceResults([]);
+        onResultsCleared();
         return;
       }
       setLoading(true);
@@ -204,7 +207,7 @@ export default function FsnbSearchPanel({
 
   return (
     <div style={{ padding: 12, height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+      <Flex vertical gap={8} style={{ width: '100%' }}>
         <Space style={{ width: '100%' }} wrap>
           <Input
             placeholder={
@@ -240,7 +243,7 @@ export default function FsnbSearchPanel({
           )}
           {scopeBadge}
         </Space>
-      </Space>
+      </Flex>
 
       <div style={{ marginTop: 12, flex: 1, overflow: 'auto' }}>
         {loading && <Spin />}

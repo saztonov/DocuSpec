@@ -59,12 +59,10 @@ export default function FsnbDetailsPanel({ target, onTargetChange }: Props) {
   }, [target]);
 
   const goBack = () => {
-    setHistory(prev => {
-      if (prev.length < 2) return prev;
-      const next = prev.slice(0, -1);
-      onTargetChange(next[next.length - 1] ?? null);
-      return next;
-    });
+    if (history.length < 2) return;
+    const next = history.slice(0, -1);
+    setHistory(next);
+    onTargetChange(next[next.length - 1] ?? null);
   };
 
   if (!target) {

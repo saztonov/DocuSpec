@@ -49,6 +49,7 @@ export default function FsnbExplorer() {
             onClearScope={() => setScope({ kind: null })}
             onSelectNorm={id => setTarget({ kind: 'norm', id })}
             onSelectResource={id => setTarget({ kind: 'resource', id })}
+            onResultsCleared={() => setTarget(null)}
           />
         </div>
         <div style={{ width: 480, minWidth: 380, background: '#fafafa' }}>

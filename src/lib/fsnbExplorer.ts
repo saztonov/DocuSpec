@@ -260,95 +260,68 @@ export async function getTreeChildren(
     }
 
     case 'collection': {
-      // Разделы внутри сборника (по collection_id — индексированный FK)
-      const { data, error } = await supabase
-        .from('fsnb_norms')
-        .select('division_code, division_name')
-        .eq('collection_id', parent.collection_id ?? '')
-        .not('division_code', 'is', null)
-        .limit(2000);
-
+      // Разделы внутри сборника — через RPC (DISTINCT на сервере + composite index).
+      const { data, error } = await supabase.rpc('fsnb_collection_divisions', {
+        p_collection_id: parent.collection_id,
+      });
       if (error) {
         console.error('[fsnbExplorer] tree division:', error.message);
         return [];
       }
-      const seen = new Map<string, string>();
-      for (const row of data ?? []) {
-        const code = row.division_code as string;
-        if (!seen.has(code)) {
-          seen.set(code, (row.division_name as string) ?? code);
-        }
-      }
-      return [...seen.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([code, name]) => ({
-          key: `div:${parent.collection_id}:${code}`,
-          title: `${code} — ${name}`,
+      return ((data ?? []) as Array<{ division_code: string; division_name: string | null }>)
+        .map(row => ({
+          key: `div:${parent.collection_id}:${row.division_code}`,
+          title: `${row.division_code} — ${row.division_name ?? ''}`,
           level: 'division' as const,
           isLeaf: false,
           collection_id: parent.collection_id,
           collection_code: parent.collection_code,
-          division_code: code,
+          division_code: row.division_code,
         }));
     }
 
     case 'division': {
-      // Таблицы внутри раздела
-      const { data, error } = await supabase
-        .from('fsnb_norms')
-        .select('table_code, table_name')
-        .eq('collection_id', parent.collection_id ?? '')
-        .eq('division_code', parent.division_code ?? '')
-        .not('table_code', 'is', null)
-        .limit(2000);
-
+      // Таблицы внутри раздела — через RPC.
+      const { data, error } = await supabase.rpc('fsnb_division_tables', {
+        p_collection_id: parent.collection_id,
+        p_division_code: parent.division_code,
+      });
       if (error) {
         console.error('[fsnbExplorer] tree table:', error.message);
         return [];
       }
-      const seen = new Map<string, string>();
-      for (const row of data ?? []) {
-        const code = row.table_code as string;
-        if (!seen.has(code)) {
-          seen.set(code, (row.table_name as string) ?? code);
-        }
-      }
-      return [...seen.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([code, name]) => ({
-          key: `tbl:${parent.collection_id}:${parent.division_code}:${code}`,
-          title: `${code} — ${name}`,
+      return ((data ?? []) as Array<{ table_code: string; table_name: string | null }>)
+        .map(row => ({
+          key: `tbl:${parent.collection_id}:${parent.division_code}:${row.table_code}`,
+          title: `${row.table_code} — ${row.table_name ?? ''}`,
           level: 'table' as const,
           isLeaf: false,
           collection_id: parent.collection_id,
           collection_code: parent.collection_code,
           division_code: parent.division_code,
-          table_code: code,
+          table_code: row.table_code,
         }));
     }
 
     case 'table': {
-      // Конкретные нормы в таблице
-      const { data, error } = await supabase
-        .from('fsnb_norms')
-        .select('id, norm_code, name')
-        .eq('collection_id', parent.collection_id ?? '')
-        .eq('division_code', parent.division_code ?? '')
-        .eq('table_code', parent.table_code ?? '')
-        .order('norm_code')
-        .limit(500);
-
+      // Конкретные нормы в таблице — через RPC.
+      const { data, error } = await supabase.rpc('fsnb_table_norms', {
+        p_collection_id: parent.collection_id,
+        p_division_code: parent.division_code,
+        p_table_code: parent.table_code,
+      });
       if (error) {
         console.error('[fsnbExplorer] tree norms:', error.message);
         return [];
       }
-      return (data ?? []).map(n => ({
-        key: `norm:${n.id}`,
-        title: `${n.norm_code} — ${n.name}`,
-        level: 'norm' as const,
-        isLeaf: true,
-        norm_id: n.id as string,
-      }));
+      return ((data ?? []) as Array<{ id: string; norm_code: string; name: string }>)
+        .map(n => ({
+          key: `norm:${n.id}`,
+          title: `${n.norm_code} — ${n.name}`,
+          level: 'norm' as const,
+          isLeaf: true,
+          norm_id: n.id,
+        }));
     }
 
     case 'tg-root': {

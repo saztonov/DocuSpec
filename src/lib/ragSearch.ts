@@ -252,6 +252,12 @@ export async function searchResources(
       return ftsSearchResources(query, resourceType, limit);
     }
 
+    // Если hybrid вернул пусто — пробуем FTS как страховку.
+    if (!data || (data as unknown[]).length === 0) {
+      console.log('[ragSearch] hybrid_search_resources пусто → FTS');
+      return ftsSearchResources(query, resourceType, limit);
+    }
+
     return ((data ?? []) as Array<{
       id: string;
       code: string;
@@ -345,6 +351,12 @@ export async function searchNorms(
     if (error) {
       console.warn(`[ragSearch] hybrid_search_norms ошибка: ${error.message}`);
       markHybridFailed();
+      return ftsSearchNorms(query, baseType, limit);
+    }
+
+    // Если hybrid вернул пусто — пробуем FTS как страховку.
+    if (!data || (data as unknown[]).length === 0) {
+      console.log('[ragSearch] hybrid_search_norms пусто → FTS');
       return ftsSearchNorms(query, baseType, limit);
     }
 
