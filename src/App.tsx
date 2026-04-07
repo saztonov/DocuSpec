@@ -26,6 +26,8 @@ function AppLayout() {
         <Content>
           <Routes>
             <Route path="/" element={<PricesPage />} />
+            {/* Скрытый прямой доступ к админке (не в меню) */}
+            <Route path="/admin" element={<AdminPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Content>
