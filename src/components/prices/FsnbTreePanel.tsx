@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Tree, Typography, Spin } from 'antd';
+import { Tree, Typography, Spin, Dropdown, Modal, message } from 'antd';
+import type { MenuProps } from 'antd';
 import {
   DatabaseOutlined,
   AppstoreOutlined,
@@ -7,6 +8,9 @@ import {
 import type { DataNode } from 'antd/es/tree';
 import {
   getTreeChildren,
+  softDeleteNorm,
+  softDeleteTable,
+  softDeleteDivision,
   type TreeLevel,
   type TreeNode,
 } from '../../lib/fsnbExplorer';
@@ -24,8 +28,17 @@ export interface ScopeSelection {
   label?: string;
 }
 
+export interface DeletedInfo {
+  kind: 'norm' | 'table' | 'division';
+  norm_id?: string;
+  collection_id?: string | null;
+  division_code?: string | null;
+  table_code?: string | null;
+}
+
 interface Props {
   onSelect: (scope: ScopeSelection) => void;
+  onDeleted?: (info: DeletedInfo) => void;
 }
 
 interface ExtNode extends DataNode {
@@ -76,7 +89,7 @@ function toTreeNode(n: TreeNode): ExtNode {
   };
 }
 
-export default function FsnbTreePanel({ onSelect }: Props) {
+export default function FsnbTreePanel({ onSelect, onDeleted }: Props) {
   const [treeData, setTreeData] = useState<ExtNode[]>(ROOT_NODES);
   const [loading, setLoading] = useState(false);
 
@@ -123,6 +136,16 @@ export default function FsnbTreePanel({ onSelect }: Props) {
 
     setTreeData(prev => insert(prev));
   };
+
+  // Иммутабельно удаляет узел по ключу со всем поддеревом
+  const removeNodeByKey = (nodes: ExtNode[], key: React.Key): ExtNode[] =>
+    nodes
+      .filter(n => n.key !== key)
+      .map(n =>
+        n.children && n.children.length > 0
+          ? { ...n, children: removeNodeByKey(n.children as ExtNode[], key) }
+          : n,
+      );
 
   const handleSelect = (_: unknown, info: { node: ExtNode }) => {
     const n = info.node;
@@ -173,6 +196,116 @@ export default function FsnbTreePanel({ onSelect }: Props) {
     }
   };
 
+  // ── Удаление ───────────────────────────────────────────────────
+  const confirmDelete = (node: ExtNode) => {
+    const label = String(node.title ?? '');
+    if (node.level === 'norm') {
+      Modal.confirm({
+        title: 'Удалить расценку?',
+        content: label,
+        okText: 'Удалить',
+        okButtonProps: { danger: true },
+        cancelText: 'Отмена',
+        onOk: async () => {
+          try {
+            if (!node.ctx.norm_id) return;
+            const n = await softDeleteNorm(node.ctx.norm_id);
+            setTreeData(prev => removeNodeByKey(prev, node.key));
+            message.success(`Расценка удалена (${n})`);
+            onDeleted?.({ kind: 'norm', norm_id: node.ctx.norm_id });
+          } catch (e) {
+            message.error(`Не удалось удалить: ${(e as Error).message}`);
+          }
+        },
+      });
+      return;
+    }
+    if (node.level === 'table') {
+      Modal.confirm({
+        title: 'Удалить подраздел со всеми расценками?',
+        content: label,
+        okText: 'Удалить',
+        okButtonProps: { danger: true },
+        cancelText: 'Отмена',
+        onOk: async () => {
+          try {
+            const { collection_id, division_code, table_code } = node.ctx;
+            if (!collection_id || !division_code || !table_code) return;
+            const n = await softDeleteTable(collection_id, division_code, table_code);
+            setTreeData(prev => removeNodeByKey(prev, node.key));
+            message.success(`Удалено расценок: ${n}`);
+            onDeleted?.({
+              kind: 'table',
+              collection_id,
+              division_code,
+              table_code,
+            });
+          } catch (e) {
+            message.error(`Не удалось удалить: ${(e as Error).message}`);
+          }
+        },
+      });
+      return;
+    }
+    if (node.level === 'division') {
+      Modal.confirm({
+        title: 'Удалить раздел со всеми подразделами и расценками?',
+        content: label,
+        okText: 'Удалить',
+        okButtonProps: { danger: true },
+        cancelText: 'Отмена',
+        onOk: async () => {
+          try {
+            const { collection_id, division_code } = node.ctx;
+            if (!collection_id || !division_code) return;
+            const n = await softDeleteDivision(collection_id, division_code);
+            setTreeData(prev => removeNodeByKey(prev, node.key));
+            message.success(`Удалено расценок: ${n}`);
+            onDeleted?.({ kind: 'division', collection_id, division_code });
+          } catch (e) {
+            message.error(`Не удалось удалить: ${(e as Error).message}`);
+          }
+        },
+      });
+    }
+  };
+
+  const menuItemsFor = (node: ExtNode): MenuProps['items'] => {
+    if (node.level === 'norm') {
+      return [{ key: 'del', danger: true, label: 'Удалить расценку' }];
+    }
+    if (node.level === 'table') {
+      return [{ key: 'del', danger: true, label: 'Удалить подраздел' }];
+    }
+    if (node.level === 'division') {
+      return [{ key: 'del', danger: true, label: 'Удалить раздел' }];
+    }
+    return [];
+  };
+
+  const titleRender = (nodeData: DataNode) => {
+    const node = nodeData as ExtNode;
+    const items = menuItemsFor(node);
+    const title = <span>{node.title as React.ReactNode}</span>;
+    if (!items || items.length === 0) {
+      return title;
+    }
+    return (
+      <Dropdown
+        menu={{
+          items,
+          onClick: ({ key, domEvent }) => {
+            domEvent.stopPropagation();
+            if (key === 'del') confirmDelete(node);
+          },
+        }}
+        trigger={['contextMenu']}
+      >
+        {title}
+      </Dropdown>
+    );
+  };
+
   return (
     <div style={{ padding: 8, height: '100%', overflow: 'auto' }}>
       <Typography.Title level={5} style={{ marginTop: 0 }}>
@@ -184,6 +317,7 @@ export default function FsnbTreePanel({ onSelect }: Props) {
         loadData={node => onLoadData(node as ExtNode)}
         treeData={treeData}
         onSelect={handleSelect}
+        titleRender={titleRender}
         defaultExpandedKeys={['root:collections']}
       />
     </div>

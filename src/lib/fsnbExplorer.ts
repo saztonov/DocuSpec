@@ -426,5 +426,53 @@ export async function getResourceTechGroups(
   }));
 }
 
+// ── Soft-delete (контекстное меню дерева) ───────────────────────
+
+/** Soft-delete одной нормы. Возвращает количество затронутых строк. */
+export async function softDeleteNorm(normId: string): Promise<number> {
+  const { data, error } = await supabase.rpc('fsnb_soft_delete_norm', {
+    p_norm_id: normId,
+  });
+  if (error) {
+    console.error('[fsnbExplorer] softDeleteNorm:', error.message);
+    throw new Error(error.message);
+  }
+  return (data as number) ?? 0;
+}
+
+/** Soft-delete всех норм подраздела (таблицы). */
+export async function softDeleteTable(
+  collectionId: string,
+  divisionCode: string,
+  tableCode: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc('fsnb_soft_delete_table', {
+    p_collection_id: collectionId,
+    p_division_code: divisionCode,
+    p_table_code: tableCode,
+  });
+  if (error) {
+    console.error('[fsnbExplorer] softDeleteTable:', error.message);
+    throw new Error(error.message);
+  }
+  return (data as number) ?? 0;
+}
+
+/** Soft-delete всех норм раздела. */
+export async function softDeleteDivision(
+  collectionId: string,
+  divisionCode: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc('fsnb_soft_delete_division', {
+    p_collection_id: collectionId,
+    p_division_code: divisionCode,
+  });
+  if (error) {
+    console.error('[fsnbExplorer] softDeleteDivision:', error.message);
+    throw new Error(error.message);
+  }
+  return (data as number) ?? 0;
+}
+
 // Re-export тип для удобства
 export type { DbFsnbCollection };

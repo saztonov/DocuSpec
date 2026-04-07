@@ -3,6 +3,7 @@ import { Tabs, Typography } from 'antd';
 import { useSearchParams } from 'react-router-dom';
 import FsnbExplorer from '../components/prices/FsnbExplorer';
 import ComingSoon from '../components/prices/ComingSoon';
+import ImportedRatesTab from '../components/prices/ImportedRatesTab';
 
 const TAB_KEYS = ['fsnb', 'estimates', 'corp'] as const;
 type TabKey = (typeof TAB_KEYS)[number];
@@ -36,12 +37,7 @@ export default function PricesPage() {
           {
             key: 'estimates',
             label: 'Сметные расценки',
-            children: (
-              <ComingSoon
-                title="Сметные расценки"
-                description="Здесь появятся расценки, извлечённые из загруженных смет."
-              />
-            ),
+            children: <ImportedRatesTab />,
           },
           {
             key: 'corp',

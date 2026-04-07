@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Layout } from 'antd';
-import FsnbTreePanel, { type ScopeSelection } from './FsnbTreePanel';
+import FsnbTreePanel, { type ScopeSelection, type DeletedInfo } from './FsnbTreePanel';
 import FsnbSearchPanel from './FsnbSearchPanel';
 import FsnbDetailsPanel, { type DetailsTarget } from './FsnbDetailsPanel';
 import { listCollections, type FsnbCollectionInfo } from '../../lib/fsnbExplorer';
@@ -39,7 +39,40 @@ export default function FsnbExplorer() {
         collapsible
         style={{ borderRight: '1px solid #f0f0f0', background: '#fafafa' }}
       >
-        <FsnbTreePanel onSelect={handleScopeSelect} />
+        <FsnbTreePanel
+          onSelect={handleScopeSelect}
+          onDeleted={(info: DeletedInfo) => {
+            // Сбрасываем правую панель, если был открыт удалённый объект
+            if (info.kind === 'norm') {
+              setTarget(prev =>
+                prev && prev.kind === 'norm' && prev.id === info.norm_id
+                  ? null
+                  : prev,
+              );
+            }
+            // Сбрасываем scope, если он был на удалённом разделе/подразделе
+            setScope(prev => {
+              if (
+                info.kind === 'division' &&
+                prev.kind === 'division' &&
+                prev.collection_id === info.collection_id &&
+                prev.division_code === info.division_code
+              ) {
+                return { kind: null };
+              }
+              if (
+                info.kind === 'table' &&
+                prev.kind === 'table' &&
+                prev.collection_id === info.collection_id &&
+                prev.division_code === info.division_code &&
+                prev.table_code === info.table_code
+              ) {
+                return { kind: null };
+              }
+              return prev;
+            });
+          }}
+        />
       </Sider>
       <Content style={{ display: 'flex', minWidth: 0 }}>
         <div style={{ flex: 1, minWidth: 0, borderRight: '1px solid #f0f0f0' }}>
