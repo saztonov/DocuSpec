@@ -2,8 +2,6 @@ import { Card, Input, Select, Space, Button } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { RateCategory, RateType } from '../../lib/importedRates';
 import type { CustomRatesFilters as Filters } from '../../hooks/useCustomRates';
-import type { RateSourceKind } from '../../types/customRates';
-import { RATE_SOURCE_LABEL } from '../../types/customRates';
 
 interface Props {
   value: Filters;
@@ -59,18 +57,6 @@ export default function CustomRatesFilters({
           value={value.typeId}
           onChange={(v) => onChange({ typeId: v ?? null })}
           options={filteredTypes.map((t) => ({ label: t.name, value: t.id }))}
-        />
-        <Select<RateSourceKind | null>
-          style={{ minWidth: 160 }}
-          placeholder="Источник"
-          allowClear
-          value={value.sourceKind}
-          onChange={(v) => onChange({ sourceKind: (v ?? null) as RateSourceKind | null })}
-          options={[
-            { label: RATE_SOURCE_LABEL.fsnb, value: 'fsnb' },
-            { label: RATE_SOURCE_LABEL.imported, value: 'imported' },
-            { label: RATE_SOURCE_LABEL.custom, value: 'custom' },
-          ]}
         />
         <Button icon={<ReloadOutlined />} onClick={handleReset}>
           Сброс
