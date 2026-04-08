@@ -43,7 +43,11 @@ interface UseRateRecommenderChatResult {
   reset: () => void;
 }
 
-export function useRateRecommenderChat(): UseRateRecommenderChatResult {
+/**
+ * @param model — id модели OpenRouter, перекрывающий env-дефолт. Если undefined,
+ *                будет использован VITE_OPENROUTER_MODEL.
+ */
+export function useRateRecommenderChat(model?: string): UseRateRecommenderChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +107,9 @@ export function useRateRecommenderChat(): UseRateRecommenderChatResult {
       setError(null);
 
       try {
+        // Применяем актуально выбранную модель к config перед каждым ходом —
+        // это позволяет переключать модель в UI без пересоздания агента.
+        configRef.current.model = model;
         const result = await continueAgentChat(configRef.current, historyRef.current);
         historyRef.current = result.messages;
 
@@ -168,7 +175,7 @@ export function useRateRecommenderChat(): UseRateRecommenderChatResult {
         setLoading(false);
       }
     },
-    [loading],
+    [loading, model],
   );
 
   const reset = useCallback(() => {

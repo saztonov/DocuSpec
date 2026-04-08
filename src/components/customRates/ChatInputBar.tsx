@@ -1,14 +1,25 @@
 import { useState } from 'react';
-import { Input, Button, Space, Popconfirm } from 'antd';
+import { Input, Button, Space, Popconfirm, Select, Typography } from 'antd';
 import { SendOutlined, ReloadOutlined } from '@ant-design/icons';
+import type { ModelOption } from '../../lib/models';
 
 interface Props {
   onSend: (text: string) => void | Promise<void>;
   onReset: () => void;
   disabled: boolean;
+  models: ModelOption[];
+  selectedModel: string;
+  onModelChange: (model: string) => void;
 }
 
-export default function ChatInputBar({ onSend, onReset, disabled }: Props) {
+export default function ChatInputBar({
+  onSend,
+  onReset,
+  disabled,
+  models,
+  selectedModel,
+  onModelChange,
+}: Props) {
   const [text, setText] = useState('');
 
   const handleSend = async () => {
@@ -52,7 +63,7 @@ export default function ChatInputBar({ onSend, onReset, disabled }: Props) {
           Отправить
         </Button>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <Popconfirm
           title="Очистить чат?"
           description="История сообщений будет удалена. Расценки в корзине останутся."
@@ -64,10 +75,18 @@ export default function ChatInputBar({ onSend, onReset, disabled }: Props) {
             Сбросить чат
           </Button>
         </Popconfirm>
-        <Space>
-          <span style={{ fontSize: 11, color: '#8c8c8c' }}>
-            Модель: {import.meta.env.VITE_OPENROUTER_MODEL || 'anthropic/claude-sonnet-4'}
-          </span>
+        <Space size={6}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            Модель:
+          </Typography.Text>
+          <Select
+            size="small"
+            value={selectedModel}
+            onChange={onModelChange}
+            disabled={disabled || models.length === 0}
+            style={{ minWidth: 220 }}
+            options={models.map((m) => ({ value: m.value, label: m.label, title: m.value }))}
+          />
         </Space>
       </div>
     </div>

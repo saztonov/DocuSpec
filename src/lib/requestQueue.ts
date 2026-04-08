@@ -112,7 +112,15 @@ const llmQueue = new RequestQueue({
   minDelayMs: 500,
   maxRetries: 5,
   initialBackoffMs: 2000,
-  retryOn: (err) => err instanceof HttpError && err.status === 429,
+  // Ретраим на 429 (rate limit) и 5xx (временные сбои провайдера: 500/502/503/504).
+  // Особенно важно для маршрутизации OpenRouter: один из бэкенд-провайдеров может
+  // отдать 502, а после backoff запрос уйдёт на следующего по списку.
+  retryOn: (err) => {
+    if (!(err instanceof HttpError)) return false;
+    if (err.status === 429) return true;
+    if (err.status >= 500 && err.status <= 599) return true;
+    return false;
+  },
   name: 'LLM',
 });
 

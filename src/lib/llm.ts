@@ -45,6 +45,24 @@ function enrichErrorText(errorText: string): string {
 }
 
 /**
+ * Извлекает HTTP-подобный код ошибки из data.error.code, если он есть.
+ * OpenRouter иногда возвращает 200 с error.code=502/503/429 в теле — это нужно
+ * классифицировать как HttpError, чтобы очередь могла ретраить.
+ */
+function extractErrorStatusCode(data: unknown): number | null {
+  if (!data || typeof data !== 'object') return null;
+  const err = (data as Record<string, unknown>).error;
+  if (!err || typeof err !== 'object') return null;
+  const code = (err as Record<string, unknown>).code;
+  if (typeof code === 'number') return code;
+  if (typeof code === 'string') {
+    const parsed = Number.parseInt(code, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+/**
  * Достаёт максимально подробный текст ошибки из ответа OpenRouter.
  * Часть провайдеров кладёт реальную причину в data.error.metadata.raw,
  * имя провайдера — в metadata.provider_name.
@@ -212,7 +230,11 @@ export async function callLlmJson(options: LlmOptions): Promise<LlmJsonResponse>
         data && typeof data === 'object' && 'error' in data
           ? `provider error: ${describeOpenRouterError(data)}`
           : `top-level keys: ${Object.keys(data || {}).join(', ')}`;
-      const err = new Error(`No content in LLM response (${fingerprint})`);
+      const innerStatus = extractErrorStatusCode(data);
+      const err =
+        innerStatus !== null && (innerStatus === 429 || innerStatus >= 500)
+          ? new HttpError(`No content in LLM response (${fingerprint})`, innerStatus)
+          : new Error(`No content in LLM response (${fingerprint})`);
       logLlmError({
         id: logId,
         pairNum,
@@ -480,7 +502,13 @@ export async function callLlmWithTools(options: LlmToolsOptions): Promise<LlmToo
         data && typeof data === 'object' && 'error' in data
           ? `provider error: ${describeOpenRouterError(data)}`
           : `top-level keys: ${Object.keys(data || {}).join(', ') || '(empty)'}, choices.length=${data?.choices?.length ?? 'undefined'}`;
-      const err = new Error(`No choice in LLM tools response (${fingerprint})`);
+      // Если внутри 200-ответа лежит error.code 429/5xx — бросаем HttpError,
+      // чтобы очередь могла применить retry с exponential backoff.
+      const innerStatus = extractErrorStatusCode(data);
+      const err =
+        innerStatus !== null && (innerStatus === 429 || innerStatus >= 500)
+          ? new HttpError(`No choice in LLM tools response (${fingerprint})`, innerStatus)
+          : new Error(`No choice in LLM tools response (${fingerprint})`);
       logLlmError({
         id: logId,
         pairNum,

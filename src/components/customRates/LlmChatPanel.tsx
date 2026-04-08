@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spin, Typography, Alert } from 'antd';
 import ChatMessageList from './ChatMessageList';
 import ChatInputBar from './ChatInputBar';
 import { useRateRecommenderChat } from '../../hooks/useRateRecommenderChat';
+import { getAvailableModels } from '../../lib/models';
 import type { Candidate } from '../../types/customRates';
 
 interface Props {
@@ -11,8 +12,27 @@ interface Props {
   onAddToDraft: (c: Candidate) => void;
 }
 
+const LS_SELECTED_MODEL = 'customRates.llmChat.selectedModel';
+
 export default function LlmChatPanel({ inDraftKeys, existingKeys, onAddToDraft }: Props) {
-  const chat = useRateRecommenderChat();
+  const models = useMemo(() => getAvailableModels(), []);
+
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    const stored = localStorage.getItem(LS_SELECTED_MODEL);
+    if (stored && models.some((m) => m.value === stored)) return stored;
+    return models[0]?.value ?? '';
+  });
+
+  const handleModelChange = (next: string) => {
+    setSelectedModel(next);
+    try {
+      localStorage.setItem(LS_SELECTED_MODEL, next);
+    } catch {
+      /* ignore quota / unavailable */
+    }
+  };
+
+  const chat = useRateRecommenderChat(selectedModel || undefined);
   const listRef = useRef<HTMLDivElement>(null);
 
   // Автоскролл вниз при новых сообщениях
@@ -83,6 +103,9 @@ export default function LlmChatPanel({ inDraftKeys, existingKeys, onAddToDraft }
             onSend={(text) => chat.sendMessage(text)}
             onReset={chat.reset}
             disabled={chat.loading}
+            models={models}
+            selectedModel={selectedModel}
+            onModelChange={handleModelChange}
           />
         </>
       )}
