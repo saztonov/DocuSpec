@@ -7,10 +7,30 @@ import { listCollections, type FsnbCollectionInfo } from '../../lib/fsnbExplorer
 
 const { Sider, Content } = Layout;
 
+const LS_ONLY_SELECTED = 'fsnb.onlySelected';
+
+function loadOnlySelected(): boolean {
+  try {
+    return localStorage.getItem(LS_ONLY_SELECTED) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export default function FsnbExplorer() {
   const [collections, setCollections] = useState<FsnbCollectionInfo[]>([]);
   const [scope, setScope] = useState<ScopeSelection>({ kind: null });
   const [target, setTarget] = useState<DetailsTarget>(null);
+  const [onlySelected, setOnlySelected] = useState<boolean>(loadOnlySelected());
+
+  const handleOnlySelectedChange = (v: boolean) => {
+    setOnlySelected(v);
+    try {
+      localStorage.setItem(LS_ONLY_SELECTED, v ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  };
 
   useEffect(() => {
     listCollections().then(setCollections);
@@ -40,6 +60,7 @@ export default function FsnbExplorer() {
         style={{ borderRight: '1px solid #f0f0f0', background: '#fafafa' }}
       >
         <FsnbTreePanel
+          onlySelected={onlySelected}
           onSelect={handleScopeSelect}
           onDeleted={(info: DeletedInfo) => {
             // Сбрасываем правую панель, если был открыт удалённый объект
@@ -79,6 +100,8 @@ export default function FsnbExplorer() {
           <FsnbSearchPanel
             collections={collections}
             scope={scope}
+            onlySelected={onlySelected}
+            onOnlySelectedChange={handleOnlySelectedChange}
             onClearScope={() => setScope({ kind: null })}
             onSelectNorm={id => setTarget({ kind: 'norm', id })}
             onSelectResource={id => setTarget({ kind: 'resource', id })}

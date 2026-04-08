@@ -26,11 +26,12 @@ import type {
 
 const LS_COLLECTIONS = 'fsnb.enabledCollections';
 const LS_SHOW_RELATIONS = 'fsnb.showRelations';
-const LS_ONLY_SELECTED = 'fsnb.onlySelected';
 
 interface Props {
   collections: FsnbCollectionInfo[];
   scope: ScopeSelection;
+  onlySelected: boolean;
+  onOnlySelectedChange: (v: boolean) => void;
   onClearScope: () => void;
   onSelectNorm: (id: string) => void;
   onSelectResource: (id: string) => void;
@@ -78,14 +79,6 @@ function saveEnabled(set: Set<string>) {
   }
 }
 
-function loadOnlySelected(): boolean {
-  try {
-    return localStorage.getItem(LS_ONLY_SELECTED) === '1';
-  } catch {
-    return false;
-  }
-}
-
 function loadShowRelations(): boolean {
   try {
     const raw = localStorage.getItem(LS_SHOW_RELATIONS);
@@ -98,6 +91,8 @@ function loadShowRelations(): boolean {
 export default function FsnbSearchPanel({
   collections,
   scope,
+  onlySelected,
+  onOnlySelectedChange,
   onClearScope,
   onSelectNorm,
   onSelectResource,
@@ -107,7 +102,6 @@ export default function FsnbSearchPanel({
   const [mode, setMode] = useState<SearchMode>('norms');
   const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set());
   const [showRelations, setShowRelations] = useState<boolean>(loadShowRelations());
-  const [onlySelected, setOnlySelected] = useState<boolean>(loadOnlySelected());
 
   const [normResults, setNormResults] = useState<EnrichedNorm[]>([]);
   const [resourceResults, setResourceResults] = useState<EnrichedResource[]>([]);
@@ -128,15 +122,6 @@ export default function FsnbSearchPanel({
     setShowRelations(v);
     try {
       localStorage.setItem(LS_SHOW_RELATIONS, v ? '1' : '0');
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const handleOnlySelectedChange = (v: boolean) => {
-    setOnlySelected(v);
-    try {
-      localStorage.setItem(LS_ONLY_SELECTED, v ? '1' : '0');
     } catch {
       /* ignore */
     }
@@ -264,7 +249,7 @@ export default function FsnbSearchPanel({
               <Typography.Text type="secondary">Только отобранные</Typography.Text>
               <Switch
                 checked={onlySelected}
-                onChange={handleOnlySelectedChange}
+                onChange={onOnlySelectedChange}
                 size="small"
               />
             </Space>

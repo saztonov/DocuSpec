@@ -39,6 +39,9 @@ export interface DeletedInfo {
 interface Props {
   onSelect: (scope: ScopeSelection) => void;
   onDeleted?: (info: DeletedInfo) => void;
+  /** Если true — дерево показывает только нормы с is_selected=true,
+   *  а ветки без отобранных норм скрываются полностью. */
+  onlySelected?: boolean;
 }
 
 interface ExtNode extends DataNode {
@@ -89,22 +92,24 @@ function toTreeNode(n: TreeNode): ExtNode {
   };
 }
 
-export default function FsnbTreePanel({ onSelect, onDeleted }: Props) {
+export default function FsnbTreePanel({ onSelect, onDeleted, onlySelected = false }: Props) {
   const [treeData, setTreeData] = useState<ExtNode[]>(ROOT_NODES);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Сразу подгружаем корни (раскрываем оба)
+    // Перезагружаем дерево при первой отрисовке и при каждом переключении
+    // фильтра «Только отобранные»: меняется сама структура веток.
+    setTreeData(ROOT_NODES);
     void loadInitial();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [onlySelected]);
 
   async function loadInitial() {
     setLoading(true);
     try {
       const [collections, tgGroups] = await Promise.all([
-        getTreeChildren('collections-root'),
-        getTreeChildren('tg-root'),
+        getTreeChildren('collections-root', {}, onlySelected),
+        getTreeChildren('tg-root', {}, onlySelected),
       ]);
       setTreeData([
         { ...ROOT_NODES[0], children: collections.map(toTreeNode) },
@@ -119,7 +124,7 @@ export default function FsnbTreePanel({ onSelect, onDeleted }: Props) {
     if (node.children && node.children.length > 0) return;
     if (node.level === 'norm' || node.level === 'tg-resource') return;
 
-    const children = await getTreeChildren(node.level as TreeLevel, node.ctx);
+    const children = await getTreeChildren(node.level as TreeLevel, node.ctx, onlySelected);
     const childNodes = children.map(toTreeNode);
 
     // Иммутабельно вставляем детей

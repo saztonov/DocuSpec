@@ -234,6 +234,9 @@ export interface TreeNode {
  * Ленивая подгрузка детей дерева ФСНБ.
  *
  * level — уровень родителя; функция вернёт его прямых детей.
+ * onlySelected — если true, RPC дерева вернут только нормы с is_selected=true,
+ * а пустые ветки (раздел/подраздел без отобранных норм) автоматически
+ * отсеиваются на стороне БД через DISTINCT ON.
  */
 export async function getTreeChildren(
   level: TreeLevel,
@@ -244,6 +247,7 @@ export async function getTreeChildren(
     table_code?: string | null;
     tg_id?: string;
   } = {},
+  onlySelected: boolean = false,
 ): Promise<TreeNode[]> {
   switch (level) {
     case 'collections-root': {
@@ -263,6 +267,7 @@ export async function getTreeChildren(
       // Разделы внутри сборника — через RPC (DISTINCT на сервере + composite index).
       const { data, error } = await supabase.rpc('fsnb_collection_divisions', {
         p_collection_id: parent.collection_id,
+        p_only_selected: onlySelected,
       });
       if (error) {
         console.error('[fsnbExplorer] tree division:', error.message);
@@ -285,6 +290,7 @@ export async function getTreeChildren(
       const { data, error } = await supabase.rpc('fsnb_division_tables', {
         p_collection_id: parent.collection_id,
         p_division_code: parent.division_code,
+        p_only_selected: onlySelected,
       });
       if (error) {
         console.error('[fsnbExplorer] tree table:', error.message);
@@ -309,6 +315,7 @@ export async function getTreeChildren(
         p_collection_id: parent.collection_id,
         p_division_code: parent.division_code,
         p_table_code: parent.table_code,
+        p_only_selected: onlySelected,
       });
       if (error) {
         console.error('[fsnbExplorer] tree norms:', error.message);
