@@ -264,6 +264,12 @@ export async function importFsnbData(
     const normBatches = chunks(allNorms, DATA_BATCH_SIZE);
     const normCodeToId = new Map<string, string>();
 
+    // Сколько норм в исходном JSON помечены v2-флагом is_selected = true.
+    // Используем для пост-импортной верификации, чтобы поймать молчаливую
+    // потерю поля (например, из-за устаревшего PostgREST schema cache).
+    const expectedSelected = allNorms.filter(n => n.is_selected === true).length;
+    let sentSelected = 0;
+
     for (let bi = 0; bi < normBatches.length; bi++) {
       const batch = normBatches[bi];
       const rows = batch.map(n => {
@@ -303,6 +309,8 @@ export async function importFsnbData(
         return true;
       });
 
+      sentSelected += dedupedRows.filter(r => r.is_selected === true).length;
+
       const { error } = await supabase
         .from('fsnb_norms')
         .upsert(dedupedRows, { onConflict: 'norm_code' });
@@ -312,7 +320,33 @@ export async function importFsnbData(
       }
 
       const done = Math.min((bi + 1) * DATA_BATCH_SIZE, totalNorms);
-      report('norms', `Нормы: ${done} / ${totalNorms}`, done, totalNorms);
+      report('norms', `Нормы: ${done} / ${totalNorms} (отобрано в JSON: ${expectedSelected})`, done, totalNorms);
+    }
+
+    // 2b'. Верификация is_selected: сравниваем JSON ↔ БД.
+    // Если расхождение — почти всегда виноват устаревший PostgREST schema cache.
+    if (expectedSelected > 0) {
+      const { count: dbSelected, error: cntErr } = await supabase
+        .from('fsnb_norms')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_selected', true);
+
+      if (cntErr) {
+        console.error('[fsnbImporter] Не удалось сверить is_selected:', cntErr.message);
+      } else {
+        console.info(
+          `[fsnbImporter] is_selected: JSON=${expectedSelected}, отправлено=${sentSelected}, в БД=${dbSelected ?? 0}`,
+        );
+        if ((dbSelected ?? 0) < expectedSelected) {
+          report(
+            'norms',
+            `⚠ is_selected потерян: в JSON ${expectedSelected}, в БД ${dbSelected ?? 0}. ` +
+              `Выполните в SQL Editor: NOTIFY pgrst, 'reload schema'; и повторите импорт.`,
+            totalNorms,
+            totalNorms,
+          );
+        }
+      }
     }
 
     // 2c. Build norm_code→id map

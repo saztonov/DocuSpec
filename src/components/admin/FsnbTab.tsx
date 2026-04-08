@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import {
   UploadOutlined, SearchOutlined, DatabaseOutlined,
-  CloudUploadOutlined, ThunderboltOutlined,
+  CloudUploadOutlined, ThunderboltOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import { supabase } from '../../lib/supabase.ts';
 import type { ImportProgress } from '../../lib/fsnbImporter.ts';
@@ -49,6 +49,7 @@ export default function FsnbTab() {
   const [stats, setStats] = useState<{
     resources: number;
     norms: number;
+    normsSelected: number;
     techGroups: number;
   } | null>(null);
 
@@ -63,20 +64,41 @@ export default function FsnbTab() {
       setCollections(data || []);
 
       // Load counts
-      const [resCount, normCount, tgCount] = await Promise.all([
+      const [resCount, normCount, normSelectedCount, tgCount] = await Promise.all([
         supabase.from('fsnb_resources').select('id', { count: 'exact', head: true }),
         supabase.from('fsnb_norms').select('id', { count: 'exact', head: true }),
+        supabase
+          .from('fsnb_norms')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_selected', true),
         supabase.from('fsnb_tech_groups').select('id', { count: 'exact', head: true }),
       ]);
       setStats({
         resources: resCount.count || 0,
         norms: normCount.count || 0,
+        normsSelected: normSelectedCount.count || 0,
         techGroups: tgCount.count || 0,
       });
     } catch (err) {
       message.error(err instanceof Error ? err.message : 'Ошибка загрузки');
     } finally {
       setCollectionsLoading(false);
+    }
+  }, [message]);
+
+  // Перезагрузка PostgREST schema cache. Нужна, если ALTER TABLE прошёл,
+  // а REST API ещё не подхватил новую колонку — типичный симптом —
+  // upsert молча отбрасывает поле (например, is_selected → 0 в БД).
+  const reloadSchemaCache = useCallback(async () => {
+    try {
+      const { error } = await supabase.rpc('pgrst_reload_schema');
+      if (error) throw error;
+      message.success('Schema cache PostgREST перезагружен');
+    } catch (err) {
+      message.error(
+        (err instanceof Error ? err.message : 'Ошибка') +
+          " — выполните в SQL Editor: NOTIFY pgrst, 'reload schema';",
+      );
     }
   }, [message]);
 
@@ -231,6 +253,11 @@ export default function FsnbTab() {
               value={stats?.norms || 0}
               prefix={<DatabaseOutlined />}
               loading={collectionsLoading}
+              suffix={
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  отобрано: {stats?.normsSelected ?? 0}
+                </Text>
+              }
             />
           </Card>
         </Col>
@@ -325,6 +352,14 @@ export default function FsnbTab() {
           loading={importing}
         >
           Догрузить ресурсный состав норм
+        </Button>
+
+        <Button
+          icon={<ReloadOutlined />}
+          onClick={reloadSchemaCache}
+          title="Если новая колонка добавлена через миграцию, но upsert её игнорирует — нажмите, чтобы PostgREST подхватил свежую схему."
+        >
+          Перезагрузить schema cache
         </Button>
       </Space>
 
