@@ -26,6 +26,65 @@ function getEmbeddingModel(): string {
   return (import.meta.env.VITE_EMBEDDING_MODEL as string) || 'openai/text-embedding-3-small';
 }
 
+/**
+ * Если errorText похож на JSON OpenRouter — пытается извлечь подробности
+ * через describeOpenRouterError; иначе возвращает исходную строку.
+ */
+function enrichErrorText(errorText: string): string {
+  const trimmed = errorText.trim();
+  if (!trimmed.startsWith('{')) return errorText;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+      return describeOpenRouterError(parsed);
+    }
+  } catch {
+    /* not JSON, fallthrough */
+  }
+  return errorText;
+}
+
+/**
+ * Достаёт максимально подробный текст ошибки из ответа OpenRouter.
+ * Часть провайдеров кладёт реальную причину в data.error.metadata.raw,
+ * имя провайдера — в metadata.provider_name.
+ */
+function describeOpenRouterError(data: unknown): string {
+  if (!data || typeof data !== 'object') return '(empty body)';
+  const root = data as Record<string, unknown>;
+  const err = root.error;
+  if (!err || typeof err !== 'object') {
+    const keys = Object.keys(root).join(', ') || '(empty)';
+    return `top-level keys: ${keys}`;
+  }
+  const errObj = err as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof errObj.message === 'string') parts.push(errObj.message);
+  if (typeof errObj.code === 'number' || typeof errObj.code === 'string') {
+    parts.push(`code=${errObj.code}`);
+  }
+  const meta = errObj.metadata;
+  if (meta && typeof meta === 'object') {
+    const metaObj = meta as Record<string, unknown>;
+    if (typeof metaObj.provider_name === 'string') {
+      parts.push(`provider=${metaObj.provider_name}`);
+    }
+    if (typeof metaObj.raw === 'string' && metaObj.raw.trim()) {
+      parts.push(`raw=${metaObj.raw.slice(0, 500)}`);
+    } else if (metaObj.raw !== undefined) {
+      try {
+        parts.push(`raw=${JSON.stringify(metaObj.raw).slice(0, 500)}`);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (Array.isArray(metaObj.reasons) && metaObj.reasons.length > 0) {
+      parts.push(`reasons=${metaObj.reasons.join('; ')}`);
+    }
+  }
+  return parts.length > 0 ? parts.join(' | ') : JSON.stringify(errObj).slice(0, 500);
+}
+
 export type ContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
@@ -82,6 +141,9 @@ export async function callLlmJson(options: LlmOptions): Promise<LlmJsonResponse>
     messages,
     temperature,
     response_format: { type: 'json_object' as const },
+    // Маршрутизировать только к провайдерам, поддерживающим все наши параметры
+    // (response_format/json_object). Иначе routed-провайдер может вернуть 400.
+    provider: { require_parameters: true },
   };
   const { id: logId, pairNum } = logLlmRequest({
     kind: 'json',
@@ -125,7 +187,7 @@ export async function callLlmJson(options: LlmOptions): Promise<LlmJsonResponse>
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'unknown error');
       const httpErr = new HttpError(
-        `OpenRouter API error ${response.status}: ${errorText}`,
+        `OpenRouter API error ${response.status}: ${enrichErrorText(errorText)}`,
         response.status,
       );
       logLlmError({
@@ -146,9 +208,11 @@ export async function callLlmJson(options: LlmOptions): Promise<LlmJsonResponse>
 
     const choice = data.choices?.[0];
     if (!choice?.message?.content) {
-      const err = new Error(
-        `No content in LLM response (top-level keys: ${Object.keys(data).join(', ')})`,
-      );
+      const fingerprint =
+        data && typeof data === 'object' && 'error' in data
+          ? `provider error: ${describeOpenRouterError(data)}`
+          : `top-level keys: ${Object.keys(data || {}).join(', ')}`;
+      const err = new Error(`No content in LLM response (${fingerprint})`);
       logLlmError({
         id: logId,
         pairNum,
@@ -338,6 +402,14 @@ export async function callLlmWithTools(options: LlmToolsOptions): Promise<LlmToo
     messages,
     tools,
     temperature,
+    // Маршрутизировать только к провайдерам, поддерживающим все наши параметры
+    // (tools, tool_choice, reasoning). Без этого OpenRouter мог отдать запрос
+    // провайдеру qwen3 без поддержки tools и вернуть 400.
+    provider: { require_parameters: true },
+    // Подавить вывод reasoning-токенов в content для reasoning-моделей
+    // (qwen3, deepseek-r1 и т.п.). Решает совместимость reasoning + tool_use,
+    // для не-reasoning моделей параметр игнорируется.
+    reasoning: { exclude: true },
   };
   const { id: logId, pairNum } = logLlmRequest({
     kind: 'tools',
@@ -381,7 +453,7 @@ export async function callLlmWithTools(options: LlmToolsOptions): Promise<LlmToo
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'unknown error');
       const httpErr = new HttpError(
-        `OpenRouter API error ${response.status}: ${errorText}`,
+        `OpenRouter API error ${response.status}: ${enrichErrorText(errorText)}`,
         response.status,
       );
       logLlmError({
@@ -404,14 +476,10 @@ export async function callLlmWithTools(options: LlmToolsOptions): Promise<LlmToo
       // Критично для отладки: сохраняем полный ответ OpenRouter.
       // Часто тут скрыта ошибка провайдера (rate limit, invalid key, model error)
       // в поле data.error, либо пустой массив choices.
-      const topKeys = Object.keys(data || {}).join(', ') || '(empty)';
-      const providerError =
-        typeof data?.error === 'object' && data.error
-          ? JSON.stringify(data.error)
-          : undefined;
-      const fingerprint = providerError
-        ? `provider error: ${providerError}`
-        : `top-level keys: ${topKeys}, choices.length=${data?.choices?.length ?? 'undefined'}`;
+      const fingerprint =
+        data && typeof data === 'object' && 'error' in data
+          ? `provider error: ${describeOpenRouterError(data)}`
+          : `top-level keys: ${Object.keys(data || {}).join(', ') || '(empty)'}, choices.length=${data?.choices?.length ?? 'undefined'}`;
       const err = new Error(`No choice in LLM tools response (${fingerprint})`);
       logLlmError({
         id: logId,
