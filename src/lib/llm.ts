@@ -26,6 +26,53 @@ function getEmbeddingModel(): string {
   return (import.meta.env.VITE_EMBEDDING_MODEL as string) || 'openai/text-embedding-3-small';
 }
 
+// ── Классификация моделей под особенности OpenRouter ─────────────
+//
+// Разные модели имеют разный набор поддерживаемых параметров. С опцией
+// provider.require_parameters=true OpenRouter не маршрутизирует запрос к
+// провайдеру, который не поддерживает хотя бы один из переданных параметров,
+// возвращая 404 "No endpoints found". Поэтому payload нужно собирать под
+// конкретный класс модели.
+//
+// - openai-reasoning  — OpenAI o-series и gpt-5*: НЕ принимают temperature/top_p,
+//                       требуют reasoning.effort (mandatory).
+// - thinking-reasoning — qwen3 / deepseek-r1: temperature ОК, но в content приходит
+//                       <think>…</think>, который ломает tool_use → exclude.
+// - plain             — anthropic, qwen2.5, llama и пр.: temperature ОК,
+//                       reasoning параметр не нужен.
+
+type ModelClass = 'openai-reasoning' | 'thinking-reasoning' | 'plain';
+
+function classifyModel(model: string): ModelClass {
+  const lower = model.toLowerCase();
+  if (/^openai\/(o\d|gpt-5)/.test(lower)) return 'openai-reasoning';
+  if (/^qwen\/qwen3/.test(lower)) return 'thinking-reasoning';
+  if (/^deepseek\/deepseek-r/.test(lower)) return 'thinking-reasoning';
+  return 'plain';
+}
+
+/**
+ * Возвращает фрагменты payload (temperature/reasoning), специфичные для класса
+ * модели. Поле provider.require_parameters добавляется в caller всегда.
+ */
+function buildModelSpecificParams(
+  model: string,
+  temperature: number,
+): { temperature?: number; reasoning?: Record<string, unknown> } {
+  const cls = classifyModel(model);
+  switch (cls) {
+    case 'openai-reasoning':
+      // temperature не поддерживается; effort 'low' = минимальные затраты,
+      // удовлетворяет mandatory-требование reasoning.
+      return { reasoning: { effort: 'low' } };
+    case 'thinking-reasoning':
+      return { temperature, reasoning: { exclude: true } };
+    case 'plain':
+    default:
+      return { temperature };
+  }
+}
+
 /**
  * Если errorText похож на JSON OpenRouter — пытается извлечь подробности
  * через describeOpenRouterError; иначе возвращает исходную строку.
@@ -81,26 +128,40 @@ function describeOpenRouterError(data: unknown): string {
   if (typeof errObj.code === 'number' || typeof errObj.code === 'string') {
     parts.push(`code=${errObj.code}`);
   }
+  let hasMeta = false;
   const meta = errObj.metadata;
   if (meta && typeof meta === 'object') {
     const metaObj = meta as Record<string, unknown>;
     if (typeof metaObj.provider_name === 'string') {
       parts.push(`provider=${metaObj.provider_name}`);
+      hasMeta = true;
     }
     if (typeof metaObj.raw === 'string' && metaObj.raw.trim()) {
-      parts.push(`raw=${metaObj.raw.slice(0, 500)}`);
+      parts.push(`raw=${metaObj.raw.slice(0, 1000)}`);
+      hasMeta = true;
     } else if (metaObj.raw !== undefined) {
       try {
-        parts.push(`raw=${JSON.stringify(metaObj.raw).slice(0, 500)}`);
+        parts.push(`raw=${JSON.stringify(metaObj.raw).slice(0, 1000)}`);
+        hasMeta = true;
       } catch {
         /* ignore */
       }
     }
     if (Array.isArray(metaObj.reasons) && metaObj.reasons.length > 0) {
       parts.push(`reasons=${metaObj.reasons.join('; ')}`);
+      hasMeta = true;
     }
   }
-  return parts.length > 0 ? parts.join(' | ') : JSON.stringify(errObj).slice(0, 500);
+  // Если metadata пустая или отсутствует — дампим всё содержимое error,
+  // чтобы любые скрытые поля провайдера попали в текст ошибки.
+  if (!hasMeta) {
+    try {
+      parts.push(`fullError=${JSON.stringify(errObj).slice(0, 1500)}`);
+    } catch {
+      /* ignore */
+    }
+  }
+  return parts.length > 0 ? parts.join(' | ') : JSON.stringify(errObj).slice(0, 1500);
 }
 
 export type ContentPart =
@@ -154,14 +215,15 @@ export async function callLlmJson(options: LlmOptions): Promise<LlmJsonResponse>
   );
   const callStart = Date.now();
 
+  const modelParams = buildModelSpecificParams(effectiveModel, temperature);
   const requestBody = {
     model: effectiveModel,
     messages,
-    temperature,
     response_format: { type: 'json_object' as const },
     // Маршрутизировать только к провайдерам, поддерживающим все наши параметры
     // (response_format/json_object). Иначе routed-провайдер может вернуть 400.
     provider: { require_parameters: true },
+    ...modelParams,
   };
   const { id: logId, pairNum } = logLlmRequest({
     kind: 'json',
@@ -419,19 +481,20 @@ export async function callLlmWithTools(options: LlmToolsOptions): Promise<LlmToo
   const effectiveModel = model || getModel();
   const callStart = Date.now();
 
+  const modelParams = buildModelSpecificParams(effectiveModel, temperature);
   const requestBody = {
     model: effectiveModel,
     messages,
     tools,
-    temperature,
     // Маршрутизировать только к провайдерам, поддерживающим все наши параметры
     // (tools, tool_choice, reasoning). Без этого OpenRouter мог отдать запрос
     // провайдеру qwen3 без поддержки tools и вернуть 400.
     provider: { require_parameters: true },
-    // Подавить вывод reasoning-токенов в content для reasoning-моделей
-    // (qwen3, deepseek-r1 и т.п.). Решает совместимость reasoning + tool_use,
-    // для не-reasoning моделей параметр игнорируется.
-    reasoning: { exclude: true },
+    // temperature/reasoning подставляются под класс модели:
+    // openai-reasoning → reasoning.effort, без temperature;
+    // thinking-reasoning (qwen3, r1) → temperature + reasoning.exclude;
+    // plain → только temperature.
+    ...modelParams,
   };
   const { id: logId, pairNum } = logLlmRequest({
     kind: 'tools',
