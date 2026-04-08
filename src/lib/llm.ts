@@ -7,6 +7,7 @@
  */
 
 import { enqueueLlm, HttpError } from './requestQueue.ts';
+import { logLlmRequest, logLlmResponse, logLlmError } from './llmLogger.ts';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_EMBEDDINGS_URL = 'https://openrouter.ai/api/v1/embeddings';
@@ -76,42 +77,100 @@ export async function callLlmJson(options: LlmOptions): Promise<LlmJsonResponse>
   );
   const callStart = Date.now();
 
+  const requestBody = {
+    model: effectiveModel,
+    messages,
+    temperature,
+    response_format: { type: 'json_object' as const },
+  };
+  const { id: logId, pairNum } = logLlmRequest({
+    kind: 'json',
+    model: effectiveModel,
+    request: requestBody,
+  });
+
   return enqueueLlm(async () => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    const response = await fetch(OPENROUTER_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${getApiKey()}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': window.location.origin,
-        'X-Title': 'DocuSpec',
-      },
-      body: JSON.stringify({
+    let response: Response;
+    try {
+      response = await fetch(OPENROUTER_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${getApiKey()}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'DocuSpec',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      logLlmError({
+        id: logId,
+        pairNum,
+        kind: 'json',
         model: effectiveModel,
-        messages,
-        temperature,
-        response_format: { type: 'json_object' },
-      }),
-      signal: controller.signal,
-    });
+        durationMs: Date.now() - callStart,
+        error: err,
+        request: requestBody,
+      });
+      throw err;
+    }
 
     clearTimeout(timer);
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'unknown error');
-      throw new HttpError(`OpenRouter API error ${response.status}: ${errorText}`, response.status);
+      const httpErr = new HttpError(
+        `OpenRouter API error ${response.status}: ${errorText}`,
+        response.status,
+      );
+      logLlmError({
+        id: logId,
+        pairNum,
+        kind: 'json',
+        model: effectiveModel,
+        durationMs: Date.now() - callStart,
+        error: httpErr,
+        status: response.status,
+        rawData: errorText,
+        request: requestBody,
+      });
+      throw httpErr;
     }
 
     const data = await response.json();
 
     const choice = data.choices?.[0];
     if (!choice?.message?.content) {
-      throw new Error('No content in LLM response');
+      const err = new Error(
+        `No content in LLM response (top-level keys: ${Object.keys(data).join(', ')})`,
+      );
+      logLlmError({
+        id: logId,
+        pairNum,
+        kind: 'json',
+        model: effectiveModel,
+        durationMs: Date.now() - callStart,
+        error: err,
+        rawData: data,
+        request: requestBody,
+      });
+      throw err;
     }
 
     const durationMs = Date.now() - callStart;
+    logLlmResponse({
+      id: logId,
+      pairNum,
+      kind: 'json',
+      model: data.model || effectiveModel,
+      durationMs,
+      response: data,
+    });
     return {
       content: choice.message.content,
       model: data.model || effectiveModel,
@@ -138,37 +197,90 @@ export interface EmbeddingOptions {
 export async function callEmbeddingApi(options: EmbeddingOptions): Promise<number[][]> {
   const { texts, model, timeoutMs = 30000 } = options;
   const effectiveModel = model || getEmbeddingModel();
+  const callStart = Date.now();
+
+  // Для embeddings в запрос логируем лишь метаданные (тексты могут быть огромные)
+  const requestBody = { model: effectiveModel, input: texts };
+  const requestLogPayload = {
+    model: effectiveModel,
+    inputCount: texts.length,
+    firstInputPreview: texts[0]?.slice(0, 120),
+  };
+  const { id: logId, pairNum } = logLlmRequest({
+    kind: 'embeddings',
+    model: effectiveModel,
+    request: requestLogPayload,
+  });
 
   return enqueueLlm(async () => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${getApiKey()}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': window.location.origin,
-        'X-Title': 'DocuSpec',
-      },
-      body: JSON.stringify({
+    let response: Response;
+    try {
+      response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${getApiKey()}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'DocuSpec',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      logLlmError({
+        id: logId,
+        pairNum,
+        kind: 'embeddings',
         model: effectiveModel,
-        input: texts,
-      }),
-      signal: controller.signal,
-    });
+        durationMs: Date.now() - callStart,
+        error: err,
+        request: requestLogPayload,
+      });
+      throw err;
+    }
 
     clearTimeout(timer);
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'unknown error');
-      throw new HttpError(`OpenRouter Embedding API error ${response.status}: ${errorText}`, response.status);
+      const httpErr = new HttpError(
+        `OpenRouter Embedding API error ${response.status}: ${errorText}`,
+        response.status,
+      );
+      logLlmError({
+        id: logId,
+        pairNum,
+        kind: 'embeddings',
+        model: effectiveModel,
+        durationMs: Date.now() - callStart,
+        error: httpErr,
+        status: response.status,
+        rawData: errorText,
+        request: requestLogPayload,
+      });
+      throw httpErr;
     }
 
     const data = await response.json();
     const embeddings: number[][] = data.data
       .sort((a: { index: number }, b: { index: number }) => a.index - b.index)
       .map((item: { embedding: number[] }) => item.embedding);
+
+    logLlmResponse({
+      id: logId,
+      pairNum,
+      kind: 'embeddings',
+      model: effectiveModel,
+      durationMs: Date.now() - callStart,
+      response: {
+        embeddingsCount: embeddings.length,
+        dimensions: embeddings[0]?.length ?? 0,
+      },
+    });
 
     return embeddings;
   });
@@ -221,38 +333,97 @@ export async function callLlmWithTools(options: LlmToolsOptions): Promise<LlmToo
   const effectiveModel = model || getModel();
   const callStart = Date.now();
 
+  const requestBody = {
+    model: effectiveModel,
+    messages,
+    tools,
+    temperature,
+  };
+  const { id: logId, pairNum } = logLlmRequest({
+    kind: 'tools',
+    model: effectiveModel,
+    request: requestBody,
+  });
+
   return enqueueLlm(async () => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    const response = await fetch(OPENROUTER_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${getApiKey()}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': window.location.origin,
-        'X-Title': 'DocuSpec',
-      },
-      body: JSON.stringify({
+    let response: Response;
+    try {
+      response = await fetch(OPENROUTER_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${getApiKey()}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'DocuSpec',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      logLlmError({
+        id: logId,
+        pairNum,
+        kind: 'tools',
         model: effectiveModel,
-        messages,
-        tools,
-        temperature,
-      }),
-      signal: controller.signal,
-    });
+        durationMs: Date.now() - callStart,
+        error: err,
+        request: requestBody,
+      });
+      throw err;
+    }
 
     clearTimeout(timer);
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'unknown error');
-      throw new HttpError(`OpenRouter API error ${response.status}: ${errorText}`, response.status);
+      const httpErr = new HttpError(
+        `OpenRouter API error ${response.status}: ${errorText}`,
+        response.status,
+      );
+      logLlmError({
+        id: logId,
+        pairNum,
+        kind: 'tools',
+        model: effectiveModel,
+        durationMs: Date.now() - callStart,
+        error: httpErr,
+        status: response.status,
+        rawData: errorText,
+        request: requestBody,
+      });
+      throw httpErr;
     }
 
     const data = await response.json();
     const choice = data.choices?.[0];
     if (!choice) {
-      throw new Error('No choice in LLM tools response');
+      // Критично для отладки: сохраняем полный ответ OpenRouter.
+      // Часто тут скрыта ошибка провайдера (rate limit, invalid key, model error)
+      // в поле data.error, либо пустой массив choices.
+      const topKeys = Object.keys(data || {}).join(', ') || '(empty)';
+      const providerError =
+        typeof data?.error === 'object' && data.error
+          ? JSON.stringify(data.error)
+          : undefined;
+      const fingerprint = providerError
+        ? `provider error: ${providerError}`
+        : `top-level keys: ${topKeys}, choices.length=${data?.choices?.length ?? 'undefined'}`;
+      const err = new Error(`No choice in LLM tools response (${fingerprint})`);
+      logLlmError({
+        id: logId,
+        pairNum,
+        kind: 'tools',
+        model: effectiveModel,
+        durationMs: Date.now() - callStart,
+        error: err,
+        rawData: data,
+        request: requestBody,
+      });
+      throw err;
     }
 
     const durationMs = Date.now() - callStart;
@@ -269,6 +440,15 @@ export async function callLlmWithTools(options: LlmToolsOptions): Promise<LlmToo
     } else {
       stop_reason = 'stop';
     }
+
+    logLlmResponse({
+      id: logId,
+      pairNum,
+      kind: 'tools',
+      model: data.model || effectiveModel,
+      durationMs,
+      response: data,
+    });
 
     return {
       content: choice.message?.content || null,

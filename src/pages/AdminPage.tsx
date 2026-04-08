@@ -7,6 +7,7 @@ import { useSections } from '../hooks/useSections.ts';
 import { usePrompts } from '../hooks/usePrompts.ts';
 import type { DbProject, DbSection, DbLlmPrompt } from '../types/database.ts';
 import FsnbTab from '../components/admin/FsnbTab.tsx';
+import LlmLogsTab from '../components/admin/LlmLogsTab.tsx';
 import AppHeader from '../components/layout/AppHeader.tsx';
 import HamburgerMenu from '../components/layout/HamburgerMenu.tsx';
 
@@ -318,6 +319,7 @@ export default function AdminPage() {
     { key: 'sections', label: 'Разделы', children: <SectionsTab /> },
     { key: 'prompts', label: 'Промпты LLM', children: <PromptsTab /> },
     { key: 'fsnb', label: 'Справочники ФСНБ', children: <FsnbTab /> },
+    { key: 'llm-logs', label: 'Логи LLM', children: <LlmLogsTab /> },
   ];
 
   return (
