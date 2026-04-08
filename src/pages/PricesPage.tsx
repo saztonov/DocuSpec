@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 import { Tabs, Typography } from 'antd';
 import { useSearchParams } from 'react-router-dom';
 import FsnbExplorer from '../components/prices/FsnbExplorer';
-import ComingSoon from '../components/prices/ComingSoon';
 import ImportedRatesTab from '../components/prices/ImportedRatesTab';
+import CustomRatesTab from '../components/customRates/CustomRatesTab';
 
 const TAB_KEYS = ['fsnb', 'estimates', 'corp'] as const;
 type TabKey = (typeof TAB_KEYS)[number];
@@ -42,12 +42,7 @@ export default function PricesPage() {
           {
             key: 'corp',
             label: 'Новые расценки',
-            children: (
-              <ComingSoon
-                title="Корпоративные расценки"
-                description="Здесь будет формироваться корпоративный справочник на базе ФСНБ."
-              />
-            ),
+            children: <CustomRatesTab />,
           },
         ]}
       />
