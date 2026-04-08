@@ -26,6 +26,7 @@ import type {
 
 const LS_COLLECTIONS = 'fsnb.enabledCollections';
 const LS_SHOW_RELATIONS = 'fsnb.showRelations';
+const LS_ONLY_SELECTED = 'fsnb.onlySelected';
 
 interface Props {
   collections: FsnbCollectionInfo[];
@@ -45,6 +46,7 @@ interface EnrichedNorm extends FsnbNormSearchResult {
   division_code: string | null;
   division_name: string | null;
   table_code: string | null;
+  is_selected: boolean | null;
 }
 
 interface EnrichedResource extends FsnbSearchResult {
@@ -76,6 +78,14 @@ function saveEnabled(set: Set<string>) {
   }
 }
 
+function loadOnlySelected(): boolean {
+  try {
+    return localStorage.getItem(LS_ONLY_SELECTED) === '1';
+  } catch {
+    return false;
+  }
+}
+
 function loadShowRelations(): boolean {
   try {
     const raw = localStorage.getItem(LS_SHOW_RELATIONS);
@@ -97,6 +107,7 @@ export default function FsnbSearchPanel({
   const [mode, setMode] = useState<SearchMode>('norms');
   const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set());
   const [showRelations, setShowRelations] = useState<boolean>(loadShowRelations());
+  const [onlySelected, setOnlySelected] = useState<boolean>(loadOnlySelected());
 
   const [normResults, setNormResults] = useState<EnrichedNorm[]>([]);
   const [resourceResults, setResourceResults] = useState<EnrichedResource[]>([]);
@@ -117,6 +128,15 @@ export default function FsnbSearchPanel({
     setShowRelations(v);
     try {
       localStorage.setItem(LS_SHOW_RELATIONS, v ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleOnlySelectedChange = (v: boolean) => {
+    setOnlySelected(v);
+    try {
+      localStorage.setItem(LS_ONLY_SELECTED, v ? '1' : '0');
     } catch {
       /* ignore */
     }
@@ -143,12 +163,15 @@ export default function FsnbSearchPanel({
             scope.kind === 'division' ||
             scope.kind === 'collection'
           ) {
-            const enriched = await fetchNormsByScope(scope, q);
+            const enriched = await fetchNormsByScope(scope, q, onlySelected);
             setNormResults(filterByCollection(enriched, enabledIds));
           } else if (hasQuery) {
-            const raw = await searchNorms(q, { limit: 30 });
+            const raw = await searchNorms(q, { limit: onlySelected ? 120 : 30 });
             const enriched = await enrichNorms(raw);
-            setNormResults(filterByCollection(enriched, enabledIds));
+            const filtered = onlySelected
+              ? enriched.filter(n => n.is_selected === true)
+              : enriched;
+            setNormResults(filterByCollection(filtered, enabledIds));
           } else {
             setNormResults([]);
           }
@@ -170,7 +193,7 @@ export default function FsnbSearchPanel({
         setLoading(false);
       }
     },
-    [enabledIds, scope],
+    [enabledIds, scope, onlySelected],
   );
 
   // Дебаунс при наборе текста
@@ -183,7 +206,7 @@ export default function FsnbSearchPanel({
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, mode, scope]);
+  }, [query, mode, scope, onlySelected]);
 
   const allCollectionsSelected =
     collections.length > 0 && enabledIds.size === collections.length;
@@ -236,6 +259,16 @@ export default function FsnbSearchPanel({
             <Typography.Text type="secondary">Показывать связи</Typography.Text>
             <Switch checked={showRelations} onChange={handleShowRelationsChange} size="small" />
           </Space>
+          {mode === 'norms' && (
+            <Space>
+              <Typography.Text type="secondary">Только отобранные</Typography.Text>
+              <Switch
+                checked={onlySelected}
+                onChange={handleOnlySelectedChange}
+                size="small"
+              />
+            </Space>
+          )}
           {!allCollectionsSelected && collections.length > 0 && (
             <Typography.Text type="warning" style={{ fontSize: 12 }}>
               Фильтр по сборникам активен ({enabledIds.size}/{collections.length})
@@ -294,6 +327,9 @@ function NormsList({
               <Space wrap>
                 <Tag color="blue">{item.base_type}</Tag>
                 <Typography.Text code>{item.norm_code}</Typography.Text>
+                {item.is_selected === true && (
+                  <Tag color="gold" style={{ margin: 0 }}>★ отобрано</Tag>
+                )}
                 <Typography.Text type="secondary">{item.measure_unit}</Typography.Text>
                 <ScoreBar score={item.score} />
               </Space>
@@ -379,7 +415,7 @@ async function enrichNorms(items: FsnbNormSearchResult[]): Promise<EnrichedNorm[
   const ids = items.map(i => i.id);
   const { data } = await supabase
     .from('fsnb_norms')
-    .select('id, collection_id, collection_code, collection_name, division_code, division_name, table_code')
+    .select('id, collection_id, collection_code, collection_name, division_code, division_name, table_code, is_selected')
     .in('id', ids);
   const meta = new Map<string, Partial<EnrichedNorm>>();
   for (const row of data ?? []) {
@@ -390,6 +426,7 @@ async function enrichNorms(items: FsnbNormSearchResult[]): Promise<EnrichedNorm[
       division_code: row.division_code as string | null,
       division_name: row.division_name as string | null,
       table_code: row.table_code as string | null,
+      is_selected: (row.is_selected as boolean | null) ?? null,
     });
   }
   return items.map(i => ({
@@ -400,6 +437,7 @@ async function enrichNorms(items: FsnbNormSearchResult[]): Promise<EnrichedNorm[
     division_code: null,
     division_name: null,
     table_code: null,
+    is_selected: null,
     ...(meta.get(i.id) ?? {}),
   }));
 }
@@ -446,6 +484,7 @@ function filterByCollection(items: EnrichedNorm[], enabled: Set<string>): Enrich
 async function fetchNormsByScope(
   scope: ScopeSelection,
   q: string,
+  onlySelected: boolean,
 ): Promise<EnrichedNorm[]> {
   // Без collection_id фильтр по collection_code не индексирован → таймаут.
   if (!scope.collection_id) return [];
@@ -453,13 +492,14 @@ async function fetchNormsByScope(
   let query = supabase
     .from('fsnb_norms')
     .select(
-      'id, norm_code, name, measure_unit, base_type, work_category, collection_id, collection_code, collection_name, division_code, division_name, table_code',
+      'id, norm_code, name, measure_unit, base_type, work_category, collection_id, collection_code, collection_name, division_code, division_name, table_code, is_selected',
     )
     .eq('collection_id', scope.collection_id)
     .limit(100);
 
   if (scope.division_code) query = query.eq('division_code', scope.division_code);
   if (scope.table_code) query = query.eq('table_code', scope.table_code);
+  if (onlySelected) query = query.eq('is_selected', true);
   if (q.trim()) {
     query = query.or(`name.ilike.%${q}%,norm_code.ilike.%${q}%`);
   }
@@ -483,6 +523,7 @@ async function fetchNormsByScope(
     division_code: r.division_code as string | null,
     division_name: r.division_name as string | null,
     table_code: r.table_code as string | null,
+    is_selected: (r.is_selected as boolean | null) ?? null,
   }));
 }
 

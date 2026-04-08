@@ -1,0 +1,22 @@
+{
+  "source_dir": "C:\\Users\\Usr\\claudeprojects\\ФСНБ-22\\ФСНБ-2022 (приказ Минстроя России от 17.02.2026 года № 91пр)",
+  "generated_at": "2026-04-08T08:06:38.944Z",
+  "filter_profile": "residential_commercial",
+  "resources_count": 14251,
+  "norms_count": 2974,
+  "tech_groups_count": 1508,
+  "tg_norm_links_count": 4044,
+  "files": [
+    "manifest.json",
+    "norms-ГЭСН-chunk-001.json",
+    "norms-ГЭСН-chunk-002.json",
+    "norms-ГЭСН-chunk-003.json",
+    "norms-ГЭСН-chunk-004.json",
+    "norms-ГЭСН-chunk-005.json",
+    "norms-ГЭСНм-chunk-001.json",
+    "norms-ГЭСНм-chunk-002.json",
+    "resources.json",
+    "tech-groups.json",
+    "tg-norm-links.json"
+  ]
+}

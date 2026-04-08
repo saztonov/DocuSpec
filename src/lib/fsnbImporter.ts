@@ -88,6 +88,8 @@ export interface ParsedNorm {
   table_name: string | null;
   resources: ParsedNormResource[];
   search_text: string;
+  /** Опционально: флаг для v1+v2flag режима импорта (см. sql/005_fsnb_is_selected.sql) */
+  is_selected?: boolean;
 }
 
 export interface ParsedTechGroup {
@@ -267,7 +269,7 @@ export async function importFsnbData(
       const rows = batch.map(n => {
         const def = COLLECTION_DEFS[n.base_type];
         const colCode = def ? def.code : n.base_type;
-        return {
+        const row: Record<string, unknown> = {
           norm_code: n.norm_code,
           base_type: n.base_type,
           name: n.name,
@@ -284,13 +286,20 @@ export async function importFsnbData(
           search_text: n.search_text,
           updated_at: new Date().toISOString(),
         };
+        // Прокидываем is_selected только если он явно задан в JSON — иначе
+        // оставляем значение в БД нетронутым при upsert (конфликт по norm_code).
+        if (typeof n.is_selected === 'boolean') {
+          row.is_selected = n.is_selected;
+        }
+        return row;
       });
 
       // Дедупликация по norm_code внутри batch (ON CONFLICT не может обработать дубли в одном INSERT)
       const seen = new Set<string>();
       const dedupedRows = rows.filter(r => {
-        if (seen.has(r.norm_code)) return false;
-        seen.add(r.norm_code);
+        const nc = r.norm_code as string;
+        if (seen.has(nc)) return false;
+        seen.add(nc);
         return true;
       });
 

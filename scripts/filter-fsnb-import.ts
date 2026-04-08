@@ -1,25 +1,43 @@
 /**
- * Фильтрует JSON-чанки ФСНБ-2022 по профилю RESIDENTIAL_COMMERCIAL
- * и пишет результат в temp/fsnb-import-filtered/.
+ * Фильтрует JSON-чанки ФСНБ-2022 по профилю и пишет результат.
  *
  * Использование:
- *   npx tsx scripts/filter-fsnb-import.ts
+ *   npx tsx scripts/filter-fsnb-import.ts                         # v1 (по table/division)
+ *   npx tsx scripts/filter-fsnb-import.ts --profile=v2            # v2 (по norm_code)
+ *   npx tsx scripts/filter-fsnb-import.ts --profile=v1+v2flag     # v1 данные, но каждая норма получает is_selected:true если входит в v2-whitelist
  *
  * Алгоритм:
  *   1. Читает все norms-*.json
- *   2. Применяет фильтр (по table_code / division_code / all)
- *   3. Собирает множество usedResourceCodes (из norms.resources[] +
- *      transitively из tg-norm-links → tech-groups.resource_codes)
+ *   2. Применяет фильтр:
+ *      - v1: по (base_type, collection_code, table_code|division_code|all) из fsnb-filter.config
+ *      - v2: по whitelist norm_code из fsnb-filter-v2.config
+ *      - v1+v2flag: как v1, но при сохранении добавляет поле is_selected
+ *   3. Собирает множество usedResourceCodes
  *   4. Фильтрует resources.json, tech-groups.json, tg-norm-links.json
- *   5. Rechunks нормы по 500 и записывает всё в temp/fsnb-import-filtered/
+ *   5. Rechunks нормы по 500 и записывает всё
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { RESIDENTIAL_COMMERCIAL, type CollectionFilter } from './fsnb-filter.config';
+import { RESIDENTIAL_COMMERCIAL_V2_NORM_CODES, WHITELIST_STATS } from './fsnb-filter-v2.config';
 
-const SRC_DIR = 'temp/fsnb-import';
-const DST_DIR = 'temp/fsnb-import-filtered';
+// ── CLI ─────────────────────────────────────────────────────────────
+const args = process.argv.slice(2);
+const profileArg = args.find(a => a.startsWith('--profile='));
+type Profile = 'v1' | 'v2' | 'v1+v2flag';
+const PROFILE: Profile =
+  profileArg === '--profile=v2' ? 'v2'
+    : profileArg === '--profile=v1+v2flag' ? 'v1+v2flag'
+    : 'v1';
+
+// v2 стартует с уже отфильтрованного v1 (чтобы norm_code однозначно резолвился
+// только в жилых сборниках — одинаковые коды между ГЭСН/ГЭСНм/ГЭСНп не смешивались).
+const SRC_DIR = PROFILE === 'v2' ? 'temp/fsnb-import-filtered' : 'temp/fsnb-import';
+const DST_DIR =
+  PROFILE === 'v2' ? 'temp/fsnb-import-filtered-v2'
+    : PROFILE === 'v1+v2flag' ? 'temp/fsnb-import-filtered-v1+v2flag'
+    : 'temp/fsnb-import-filtered';
 const CHUNK_SIZE = 500;
 
 interface ParsedNorm {
@@ -62,6 +80,8 @@ function matchesFilter(norm: ParsedNorm, filter: CollectionFilter | undefined): 
 }
 
 function main() {
+  console.log(`Профиль: ${PROFILE}${PROFILE === 'v2' ? ` (whitelist ${WHITELIST_STATS.total} норм)` : ''}`);
+
   if (!fs.existsSync(SRC_DIR)) {
     console.error(`Источник не найден: ${SRC_DIR}`);
     process.exit(1);
@@ -82,15 +102,29 @@ function main() {
   const keptNorms: ParsedNorm[] = [];
   const byCollection: Record<string, number> = {};
   let totalRead = 0;
+  let selectedCount = 0;
 
   for (const f of normFiles) {
     const arr = JSON.parse(fs.readFileSync(path.join(SRC_DIR, f), 'utf8')) as ParsedNorm[];
     totalRead += arr.length;
     for (const n of arr) {
-      const key = `${n.base_type}|${n.collection_code}`;
-      const filter = RESIDENTIAL_COMMERCIAL[key];
-      if (matchesFilter(n, filter)) {
+      let pass = false;
+      if (PROFILE === 'v2') {
+        pass = RESIDENTIAL_COMMERCIAL_V2_NORM_CODES.has(n.norm_code);
+      } else {
+        // v1 и v1+v2flag используют один и тот же фильтр коллекций
+        const key = `${n.base_type}|${n.collection_code}`;
+        pass = matchesFilter(n, RESIDENTIAL_COMMERCIAL[key]);
+      }
+      if (pass) {
+        // В v1+v2flag режиме добавляем флаг is_selected прямо в объект нормы
+        if (PROFILE === 'v1+v2flag') {
+          const selected = RESIDENTIAL_COMMERCIAL_V2_NORM_CODES.has(n.norm_code);
+          (n as ParsedNorm & { is_selected: boolean }).is_selected = selected;
+          if (selected) selectedCount++;
+        }
         keptNorms.push(n);
+        const key = `${n.base_type}|${n.collection_code}`;
         byCollection[key] = (byCollection[key] || 0) + 1;
       }
     }
@@ -98,6 +132,9 @@ function main() {
 
   console.log(`Всего прочитано: ${totalRead}`);
   console.log(`Оставлено: ${keptNorms.length}`);
+  if (PROFILE === 'v1+v2flag') {
+    console.log(`Из них is_selected=true: ${selectedCount} (v2-подмножество)`);
+  }
   console.log('─ По сборникам ─');
   for (const [k, v] of Object.entries(byCollection).sort()) {
     console.log(`  ${v.toString().padStart(5)} ${k}`);
