@@ -1,5 +1,5 @@
-import { Button, Empty, Popconfirm, Typography } from 'antd';
-import { ClearOutlined, SaveOutlined } from '@ant-design/icons';
+import { Button, Empty, Typography } from 'antd';
+import { SaveOutlined } from '@ant-design/icons';
 import DraftRateRow from './DraftRateRow';
 import type { DraftRow } from '../../types/customRates';
 import type { RateCategory, RateType } from '../../lib/importedRates';
@@ -12,7 +12,6 @@ interface Props {
   validCount: number;
   onUpdate: (rowId: string, patch: Partial<DraftRow>) => void;
   onRemove: (rowId: string) => void;
-  onClear: () => void;
   onSaveAll: () => void;
 }
 
@@ -24,38 +23,17 @@ export default function DraftBasketPanel({
   validCount,
   onUpdate,
   onRemove,
-  onClear,
   onSaveAll,
 }: Props) {
   return (
-    <>
-      <div
-        style={{
-          height: 48,
-          flexShrink: 0,
-          padding: '0 16px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          borderBottom: '1px solid #e8e8e8',
-          background: '#fff',
-        }}
-      >
-        <Typography.Text strong>Черновик ({rows.length})</Typography.Text>
-        {rows.length > 0 && (
-          <Popconfirm
-            title="Очистить корзину?"
-            description="Все несохранённые расценки будут потеряны."
-            okText="Очистить"
-            okButtonProps={{ danger: true }}
-            cancelText="Отмена"
-            onConfirm={onClear}
-          >
-            <Button icon={<ClearOutlined />} type="text" size="small" />
-          </Popconfirm>
-        )}
-      </div>
-
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
       <div style={{ flex: 1, overflowY: 'auto', padding: 12, minHeight: 0 }}>
         {rows.length === 0 ? (
           <div style={{ paddingTop: 32 }}>
@@ -84,6 +62,7 @@ export default function DraftBasketPanel({
 
       <div
         style={{
+          flexShrink: 0,
           padding: 12,
           borderTop: '1px solid #e8e8e8',
           background: '#fff',
@@ -109,6 +88,6 @@ export default function DraftBasketPanel({
           </Typography.Text>
         )}
       </div>
-    </>
+    </div>
   );
 }

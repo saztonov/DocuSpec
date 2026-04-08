@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
-import { Typography, message, Divider, Collapse } from 'antd';
+import { Button, Popconfirm, Typography, message, Divider, Collapse } from 'antd';
+import { ClearOutlined } from '@ant-design/icons';
 import { useCustomRates, DEFAULT_CUSTOM_RATES_FILTERS } from '../../hooks/useCustomRates';
 import { loadCategories, loadTypes } from '../../lib/importedRates';
 import { batchCreateCustomRates, loadExistingSourceKeys } from '../../lib/customRates';
@@ -14,6 +15,7 @@ import CustomRatesTable from './CustomRatesTable';
 import QuickSearchPanel from './QuickSearchPanel';
 import LlmChatPanel from './LlmChatPanel';
 import DraftBasketPanel from './DraftBasketPanel';
+import CollapsiblePanel from './CollapsiblePanel';
 
 export default function CustomRatesTab() {
   const [filters, setFilters] = useState(DEFAULT_CUSTOM_RATES_FILTERS);
@@ -157,72 +159,30 @@ export default function CustomRatesTab() {
           }}
         >
           {/* Секция 1: Быстрый поиск */}
-          <div
-            style={{
-              background: '#fff',
-              border: '1px solid #f0f0f0',
-              borderRadius: 8,
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              minHeight: 360,
-              maxHeight: 560,
-            }}
+          <CollapsiblePanel
+            title="Быстрый поиск"
+            subtitle="Нестрогий поиск по ФСНБ и 1С с настраиваемой чувствительностью"
+            expandedHeight={560}
           >
-            <div
-              style={{
-                padding: '10px 24px',
-                borderBottom: '1px solid #f0f0f0',
-                background: '#fafafa',
-              }}
-            >
-              <Typography.Text strong>Быстрый поиск</Typography.Text>
-              <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                Нестрогий поиск по ФСНБ и 1С с настраиваемой чувствительностью
-              </Typography.Text>
-            </div>
-            <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-              <QuickSearchPanel
-                inDraftKeys={state.inDraftKeys}
-                existingKeys={existingKeys}
-                onAddToDraft={(c) => dispatch({ type: 'ADD_TO_DRAFT', candidate: c })}
-              />
-            </div>
-          </div>
+            <QuickSearchPanel
+              inDraftKeys={state.inDraftKeys}
+              existingKeys={existingKeys}
+              onAddToDraft={(c) => dispatch({ type: 'ADD_TO_DRAFT', candidate: c })}
+            />
+          </CollapsiblePanel>
 
           {/* Секция 2: Умный поиск (LLM-чат) */}
-          <div
-            style={{
-              background: '#fff',
-              border: '1px solid #f0f0f0',
-              borderRadius: 8,
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              minHeight: 420,
-              maxHeight: 680,
-            }}
+          <CollapsiblePanel
+            title="Умный поиск (LLM)"
+            subtitle="Опишите работы — агент подберёт набор расценок и может задавать уточнения"
+            expandedHeight={680}
           >
-            <div
-              style={{
-                padding: '10px 24px',
-                borderBottom: '1px solid #f0f0f0',
-                background: '#fafafa',
-              }}
-            >
-              <Typography.Text strong>Умный поиск (LLM)</Typography.Text>
-              <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                Опишите работы — агент подберёт набор расценок и может задавать уточнения
-              </Typography.Text>
-            </div>
-            <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-              <LlmChatPanel
-                inDraftKeys={state.inDraftKeys}
-                existingKeys={existingKeys}
-                onAddToDraft={(c) => dispatch({ type: 'ADD_TO_DRAFT', candidate: c })}
-              />
-            </div>
-          </div>
+            <LlmChatPanel
+              inDraftKeys={state.inDraftKeys}
+              existingKeys={existingKeys}
+              onAddToDraft={(c) => dispatch({ type: 'ADD_TO_DRAFT', candidate: c })}
+            />
+          </CollapsiblePanel>
         </div>
 
         {/* Правая колонка — корзина-черновик */}
@@ -230,29 +190,39 @@ export default function CustomRatesTab() {
           style={{
             width: 460,
             flexShrink: 0,
-            background: '#fff',
-            border: '1px solid #f0f0f0',
-            borderRadius: 8,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            minHeight: 620,
-            maxHeight: 'calc(100vh - 180px)',
             position: 'sticky',
             top: 16,
           }}
         >
-          <DraftBasketPanel
-            rows={state.draftRows}
-            categories={categories}
-            types={types}
-            saving={saving}
-            validCount={validCount}
-            onUpdate={(rowId, patch) => dispatch({ type: 'UPDATE_DRAFT_ROW', rowId, patch })}
-            onRemove={(rowId) => dispatch({ type: 'REMOVE_DRAFT_ROW', rowId })}
-            onClear={() => dispatch({ type: 'CLEAR_DRAFT' })}
-            onSaveAll={handleSaveAll}
-          />
+          <CollapsiblePanel
+            title={`Черновик (${state.draftRows.length})`}
+            expandedHeight="calc(100vh - 180px)"
+            extra={
+              state.draftRows.length > 0 ? (
+                <Popconfirm
+                  title="Очистить корзину?"
+                  description="Все несохранённые расценки будут потеряны."
+                  okText="Очистить"
+                  okButtonProps={{ danger: true }}
+                  cancelText="Отмена"
+                  onConfirm={() => dispatch({ type: 'CLEAR_DRAFT' })}
+                >
+                  <Button icon={<ClearOutlined />} type="text" size="small" />
+                </Popconfirm>
+              ) : undefined
+            }
+          >
+            <DraftBasketPanel
+              rows={state.draftRows}
+              categories={categories}
+              types={types}
+              saving={saving}
+              validCount={validCount}
+              onUpdate={(rowId, patch) => dispatch({ type: 'UPDATE_DRAFT_ROW', rowId, patch })}
+              onRemove={(rowId) => dispatch({ type: 'REMOVE_DRAFT_ROW', rowId })}
+              onSaveAll={handleSaveAll}
+            />
+          </CollapsiblePanel>
         </div>
       </div>
 
