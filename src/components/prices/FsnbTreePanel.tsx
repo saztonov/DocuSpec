@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Tree, Typography, Spin, Dropdown, Modal, message } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -92,42 +92,196 @@ function toTreeNode(n: TreeNode): ExtNode {
   };
 }
 
+// ── Персист раскрытых ключей ─────────────────────────────────────
+const LS_EXPANDED_KEYS = 'fsnb.expandedKeys';
+const DEFAULT_EXPANDED: React.Key[] = ['root:collections'];
+
+function loadExpandedKeys(): React.Key[] {
+  try {
+    const raw = localStorage.getItem(LS_EXPANDED_KEYS);
+    if (!raw) return DEFAULT_EXPANDED;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return DEFAULT_EXPANDED;
+    const keys = parsed.filter((k): k is string => typeof k === 'string');
+    return keys.length > 0 ? keys : DEFAULT_EXPANDED;
+  } catch {
+    return DEFAULT_EXPANDED;
+  }
+}
+
+function saveExpandedKeys(keys: React.Key[]): void {
+  try {
+    localStorage.setItem(
+      LS_EXPANDED_KEYS,
+      JSON.stringify(keys.map(k => String(k))),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+// ── Утилиты обхода дерева ────────────────────────────────────────
+
+/** Собрать множество всех ключей, реально присутствующих в дереве. */
+function collectKeys(nodes: ExtNode[], out: Set<React.Key> = new Set()): Set<React.Key> {
+  for (const n of nodes) {
+    out.add(n.key);
+    if (n.children && n.children.length > 0) {
+      collectKeys(n.children as ExtNode[], out);
+    }
+  }
+  return out;
+}
+
 export default function FsnbTreePanel({ onSelect, onDeleted, onlySelected = false }: Props) {
   const [treeData, setTreeData] = useState<ExtNode[]>(ROOT_NODES);
   const [loading, setLoading] = useState(false);
+  const [expandedKeys, setExpandedKeysState] = useState<React.Key[]>(() =>
+    loadExpandedKeys(),
+  );
 
+  // Счётчик поколений для инвалидации устаревших async-запросов.
+  const genRef = useRef(0);
+  // Актуальный onlySelected для стабильного замыкания в onLoadData.
+  const onlySelectedRef = useRef(onlySelected);
   useEffect(() => {
-    // Перезагружаем дерево при первой отрисовке и при каждом переключении
-    // фильтра «Только отобранные»: меняется сама структура веток.
-    setTreeData(ROOT_NODES);
-    void loadInitial();
+    onlySelectedRef.current = onlySelected;
+  }, [onlySelected]);
+  // Актуальный expandedKeys для refresh без лишних пересозданий функций.
+  const expandedKeysRef = useRef(expandedKeys);
+  useEffect(() => {
+    expandedKeysRef.current = expandedKeys;
+  }, [expandedKeys]);
+
+  const updateExpandedKeys = useCallback((keys: React.Key[]) => {
+    setExpandedKeysState(keys);
+    saveExpandedKeys(keys);
+  }, []);
+
+  /**
+   * Рекурсивно подгружает детей для узлов, чьи ключи есть в targetExpanded.
+   * Используется и при первичной загрузке (восстановление из localStorage),
+   * и при переключении onlySelected (перечитывание раскрытых веток).
+   */
+  const buildExpandedSubtree = useCallback(
+    async (
+      seeds: ExtNode[],
+      targetExpanded: Set<React.Key>,
+      nextOnlySelected: boolean,
+      myGen: number,
+    ): Promise<ExtNode[]> => {
+      const walk = async (nodes: ExtNode[]): Promise<ExtNode[]> => {
+        const result: ExtNode[] = [];
+        for (const node of nodes) {
+          if (myGen !== genRef.current) return result;
+          // Листья и нераскрытые узлы — как есть (без children).
+          if (node.level === 'norm' || node.level === 'tg-resource') {
+            result.push(node);
+            continue;
+          }
+          if (!targetExpanded.has(node.key)) {
+            // Ветка свёрнута — детей не трогаем, пусть подгрузятся лениво.
+            result.push({ ...node, children: undefined });
+            continue;
+          }
+          // Ветка раскрыта — тянем актуальных детей.
+          const children = await getTreeChildren(
+            node.level as TreeLevel,
+            node.ctx,
+            nextOnlySelected,
+          );
+          if (myGen !== genRef.current) return result;
+          const childNodes = children.map(toTreeNode);
+          const resolvedChildren = await walk(childNodes);
+          result.push({ ...node, children: resolvedChildren });
+        }
+        return result;
+      };
+      return walk(seeds);
+    },
+    [],
+  );
+
+  /**
+   * Перечитать оба корня и все раскрытые ветки с заданным onlySelected.
+   * Сохраняет позицию пользователя насколько это возможно.
+   */
+  const refreshTree = useCallback(
+    async (nextOnlySelected: boolean) => {
+      genRef.current += 1;
+      const myGen = genRef.current;
+      setLoading(true);
+      try {
+        const [collections, tgGroups] = await Promise.all([
+          getTreeChildren('collections-root', {}, nextOnlySelected),
+          getTreeChildren('tg-root', {}, nextOnlySelected),
+        ]);
+        if (myGen !== genRef.current) return;
+
+        const targetExpanded = new Set<React.Key>(expandedKeysRef.current);
+
+        const collectionNodes = collections.map(toTreeNode);
+        const tgNodes = tgGroups.map(toTreeNode);
+
+        const [collectionChildren, tgChildren] = await Promise.all([
+          targetExpanded.has('root:collections')
+            ? buildExpandedSubtree(collectionNodes, targetExpanded, nextOnlySelected, myGen)
+            : Promise.resolve(collectionNodes.map(n => ({ ...n, children: undefined }))),
+          targetExpanded.has('root:tg')
+            ? buildExpandedSubtree(tgNodes, targetExpanded, nextOnlySelected, myGen)
+            : Promise.resolve(tgNodes.map(n => ({ ...n, children: undefined }))),
+        ]);
+        if (myGen !== genRef.current) return;
+
+        const newTree: ExtNode[] = [
+          {
+            ...ROOT_NODES[0],
+            children: targetExpanded.has('root:collections') ? collectionChildren : undefined,
+          },
+          {
+            ...ROOT_NODES[1],
+            children: targetExpanded.has('root:tg') ? tgChildren : undefined,
+          },
+        ];
+
+        // Оставляем в expandedKeys только реально существующие ключи.
+        const existingKeys = collectKeys(newTree);
+        const filteredExpanded = expandedKeysRef.current.filter(k => existingKeys.has(k));
+
+        setTreeData(newTree);
+        if (filteredExpanded.length !== expandedKeysRef.current.length) {
+          updateExpandedKeys(filteredExpanded);
+        }
+      } finally {
+        if (myGen === genRef.current) {
+          setLoading(false);
+        }
+      }
+    },
+    [buildExpandedSubtree, updateExpandedKeys],
+  );
+
+  // Первая загрузка + реакция на переключение флага.
+  useEffect(() => {
+    void refreshTree(onlySelected);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onlySelected]);
 
-  async function loadInitial() {
-    setLoading(true);
-    try {
-      const [collections, tgGroups] = await Promise.all([
-        getTreeChildren('collections-root', {}, onlySelected),
-        getTreeChildren('tg-root', {}, onlySelected),
-      ]);
-      setTreeData([
-        { ...ROOT_NODES[0], children: collections.map(toTreeNode) },
-        { ...ROOT_NODES[1], children: tgGroups.map(toTreeNode) },
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const onLoadData = async (node: ExtNode): Promise<void> => {
+  const onLoadData = useCallback(async (node: ExtNode): Promise<void> => {
     if (node.children && node.children.length > 0) return;
     if (node.level === 'norm' || node.level === 'tg-resource') return;
 
-    const children = await getTreeChildren(node.level as TreeLevel, node.ctx, onlySelected);
+    const myGen = genRef.current;
+    const children = await getTreeChildren(
+      node.level as TreeLevel,
+      node.ctx,
+      onlySelectedRef.current,
+    );
+    if (myGen !== genRef.current) return;
+
     const childNodes = children.map(toTreeNode);
 
-    // Иммутабельно вставляем детей
+    // Иммутабельно вставляем детей.
     const insert = (nodes: ExtNode[]): ExtNode[] =>
       nodes.map(n => {
         if (n.key === node.key) {
@@ -140,7 +294,14 @@ export default function FsnbTreePanel({ onSelect, onDeleted, onlySelected = fals
       });
 
     setTreeData(prev => insert(prev));
-  };
+  }, []);
+
+  const onExpand = useCallback(
+    (keys: React.Key[]) => {
+      updateExpandedKeys(keys);
+    },
+    [updateExpandedKeys],
+  );
 
   // Иммутабельно удаляет узел по ключу со всем поддеревом
   const removeNodeByKey = (nodes: ExtNode[], key: React.Key): ExtNode[] =>
@@ -323,7 +484,8 @@ export default function FsnbTreePanel({ onSelect, onDeleted, onlySelected = fals
         treeData={treeData}
         onSelect={handleSelect}
         titleRender={titleRender}
-        defaultExpandedKeys={['root:collections']}
+        expandedKeys={expandedKeys}
+        onExpand={onExpand}
       />
     </div>
   );
