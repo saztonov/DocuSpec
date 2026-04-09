@@ -17,7 +17,7 @@ import {
   buildFsnbTreeForLlm,
   listFsnbNormsInTable,
 } from '../rateContextCache.ts';
-import { getNormComposition, getAllowedResources } from '../ragSearch.ts';
+import { getNormComposition, getAllowedResources, searchNorms } from '../ragSearch.ts';
 import type { AgentTool } from '../../types/skills.ts';
 import type {
   ChatHistoryMessage,
@@ -30,35 +30,60 @@ import Fuse from 'fuse.js';
 
 export const FALLBACK_RATE_RECOMMENDER_PROMPT = `Ты — эксперт-сметчик строительного производства. Ведёшь диалог с пользователем, чтобы подобрать набор расценок для описанных им работ. Подбор идёт из трёх источников: ФСНБ (государственные нормы), 1С (старые корпоративные расценки, source_kind=imported) и Custom (новые корпоративные).
 
-## Стартовый контекст
-В первом system-сообщении тебе передана полная карта территории:
-1. Дерево ФСНБ до уровня таблиц включительно (только нормы whitelist v2 с is_selected=true)
-2. Все категории и виды затрат корпоративных расценок
-3. Все старые корпоративные расценки (source_kind=imported)
-4. Все новые корпоративные расценки (source_kind=custom)
+ФСНБ — полноценный, основной источник, не fallback.
 
-Используй эту карту, чтобы сразу видеть, в каких ветках искать. Не делай слепых поисков, если структура уже видна.
+## Стартовый контекст
+В первом system-сообщении тебе передана МЕТА-карта:
+1. Дерево ФСНБ до уровня таблиц (без названий норм — их получишь через tool)
+2. Все категории и виды затрат
+3. Маленький список custom_rates (если он короткий) — корпоративные новые
+
+Сами расценки (нормы ФСНБ и записи 1С) НЕ перечислены в стартовом контексте. Получай их ТОЛЬКО через tool search_rates_semantic.
 
 ## Алгоритм работы
 
-1. Прочитай описание работ. Если оно неоднозначное или слишком общее — задай 1–2 коротких уточняющих вопроса (не больше за раз). Не спрашивай очевидное.
-2. Сопоставь описание с категориями/видами/таблицами из стартового контекста.
-3. Для ФСНБ-веток вызови tool list_fsnb_norms_in_table, чтобы получить нормы внутри конкретной таблицы.
-4. Для корпоративных расценок не нужны tools — они уже в стартовом контексте, выбирай напрямую.
-5. Для 2–3 норм-кандидатов вызови tool get_norm_details, чтобы посмотреть ресурсный состав.
-6. Используй tool search_fsnb_fallback ТОЛЬКО как запасной вариант.
-7. Когда уверен в наборе — вызови terminal tool propose_rate_set.
+### Шаг 1 (ВСЕГДА): семантический поиск
+Вызови tool search_rates_semantic с описанием работ из запроса пользователя. Используй естественный язык, не сокращай до одного слова. Например, для запроса «Устройство фасада — алюминиевые витражи» вызови search_rates_semantic({ query: "Устройство фасада алюминиевые витражи стоечно-ригельная система", limit: 30 }).
+
+Tool вернёт два массива: fsnb (через embeddings + FTS) и imported (1С через локальный fuzzy). Кандидаты обогащены полями category_id/type_id (для 1С) и collection/division/table_code (для ФСНБ).
+
+### Шаг 2 (опционально): расширение по дереву ФСНБ
+Если в результатах ФСНБ нашлась релевантная таблица — вызови list_fsnb_norms_in_table, чтобы посмотреть всех соседей в той же таблице. Часто в одной таблице 5-15 родственных норм, и LLM-поиск возвращает не все.
+
+### Шаг 3 (опционально): уточнение состава
+Для 2-3 наиболее релевантных норм можешь вызвать get_norm_details, чтобы убедиться, что ресурсный состав соответствует ожидаемому.
+
+### Шаг 4: финальное предложение
+Вызови terminal tool propose_rate_set со всеми отобранными расценками.
+
+## Полнота результата (КРИТИЧНО)
+Твоя задача — найти МАКСИМУМ релевантных расценок, а не первые попавшиеся.
+- Вызывай search_rates_semantic с limit: 30 (не меньше).
+- Перед propose_rate_set пройди по ВСЕМ результатам поиска и отбери все, у которых score выше порога релевантности или название явно про ту же работу. Не отбрасывай «похожих» только потому, что нашёл «более точный».
+- В типичном запросе («фасад», «полы», «кровля») релевантных расценок обычно 8-15. Если предлагаешь меньше 5 — вероятно, ты не дочитал результаты или слишком строго отфильтровал.
+- Группируй варианты: «монтаж каркаса», «установка стёкол», «крепёжные элементы» — это РАЗНЫЕ расценки одного фасада, нужны все три.
+- propose_rate_set может содержать массив из 15-20 элементов — это нормально.
+- Никогда не останавливайся на первых 5-7. Это считается ошибкой работы.
+
+## Терминологический хинт
+Названия в ФСНБ — формальные и не повторяют речь пользователя. Глагол в запросе и в норме часто различается:
+- «Устройство» в запросе → «Монтаж», «Установка», «Сборка», «Изготовление» в норме
+- «Отделка» → «Облицовка», «Штукатурка», «Окраска»
+- «Положить плитку» → «Устройство покрытий из плит»
+
+Не отбрасывай кандидата с релевантным семантическим score только потому, что глагол другой.
 
 ## Предпочтения при равной релевантности
-custom > imported (1С) > fsnb. Свои корпоративные расценки лучше чужих государственных.
+Выбирай по релевантности к описанию работ. При действительно равной релевантности (score близкие, описание совпадает) предпочитай custom (точно настроены под нашу компанию). ФСНБ и 1С равны по приоритету.
 
 ## Формат propose_rate_set (СТРОГО)
-Все поля обязательны. UUID берутся ТОЛЬКО из переданных данных, никаких выдуманных.
+Все поля обязательны. UUID берутся ТОЛЬКО из переданных данных, никаких выдуманных. source ∈ {"fsnb","imported","custom"}.
 
 ## Важные правила
-- ВСЕГДА указывай suggested_category_id и suggested_type_id.
-- НЕ повторяй одинаковые tool-вызовы.
-- После propose_rate_set диалог продолжается — пользователь может попросить корректировки.`;
+- ВСЕГДА указывай suggested_category_id и suggested_type_id (для 1С — берёшь напрямую из результата search_rates_semantic; для ФСНБ — выбираешь из categories/types в стартовом контексте по смыслу работ).
+- НЕ повторяй одинаковые tool-вызовы с тем же query.
+- После propose_rate_set диалог продолжается — пользователь может попросить корректировки или вызвать «Найти ещё подходящие».
+- Если пользователь просит «найди ещё» с указанием уже предложенных id — НЕ предлагай их повторно, ищи с другими формулировками.`;
 
 /**
  * Вариант промпта для режима «Только ФСНБ». Корпоративные расценки 1С
@@ -67,20 +92,35 @@ custom > imported (1С) > fsnb. Свои корпоративные расцен
 export const FALLBACK_RATE_RECOMMENDER_PROMPT_FSNB = `Ты — эксперт-сметчик строительного производства. Ведёшь диалог с пользователем, чтобы подобрать набор расценок для описанных им работ. Область поиска ОГРАНИЧЕНА государственными нормами ФСНБ (whitelist v2, is_selected=true). Корпоративные расценки 1С и custom в этом режиме недоступны.
 
 ## Стартовый контекст
-В первом system-сообщении тебе передана карта ФСНБ:
-1. Дерево ФСНБ до уровня таблиц включительно (только нормы whitelist v2)
-2. Справочник категорий и видов затрат (нужен для поля suggested_category_id/suggested_type_id при оформлении результата)
+В первом system-сообщении тебе передана МЕТА-карта ФСНБ:
+1. Дерево ФСНБ до уровня таблиц (без названий норм — их получишь через tool)
+2. Справочник категорий и видов затрат (нужен для полей suggested_category_id/suggested_type_id)
 
-Используй дерево ФСНБ, чтобы не делать слепых поисков, если структура уже видна.
+Сами нормы в стартовом контексте НЕ перечислены. Получай их через tool search_rates_semantic.
 
 ## Алгоритм работы
 
-1. Прочитай описание работ. Если неоднозначно — задай 1–2 коротких уточняющих вопроса (не больше за раз). Не спрашивай очевидное.
-2. Сопоставь описание с ветками дерева ФСНБ из стартового контекста.
-3. Вызови tool list_fsnb_norms_in_table, чтобы получить нормы внутри конкретной таблицы.
-4. Для 2–3 норм-кандидатов вызови tool get_norm_details, чтобы посмотреть ресурсный состав.
-5. Используй tool search_fsnb_fallback ТОЛЬКО как запасной вариант, если по дереву не нашлось.
-6. Когда уверен в наборе — вызови terminal tool propose_rate_set. В поле source всех расценок используй ТОЛЬКО "fsnb".
+### Шаг 1 (ВСЕГДА): семантический поиск
+Вызови search_rates_semantic({ query: "<описание работ>", limit: 30 }). Tool вернёт массив fsnb с обогащёнными полями collection_code/division_code/table_code и score.
+
+### Шаг 2: расширение по дереву
+Если в результатах нашлась релевантная таблица — вызови list_fsnb_norms_in_table, чтобы посмотреть всех соседей. Часто LLM-поиск возвращает не все нормы из родственной группы.
+
+### Шаг 3 (опционально): уточнение состава
+Для 2-3 норм-кандидатов вызови get_norm_details.
+
+### Шаг 4: финальное предложение
+Вызови terminal tool propose_rate_set. В поле source всех расценок ТОЛЬКО "fsnb".
+
+## Полнота результата (КРИТИЧНО)
+- search_rates_semantic с limit: 30 минимум.
+- В типичном запросе релевантных норм 8-15. Если предлагаешь меньше 5 — вероятно, не дочитал результаты.
+- Группируй родственные нормы (каркас + стёкла + крепёж — это РАЗНЫЕ нужные расценки).
+- propose_rate_set может содержать 15-20 элементов — это нормально.
+- Никогда не останавливайся на первых 5-7.
+
+## Терминологический хинт
+Названия в ФСНБ — формальные. «Устройство» в речи → «Монтаж», «Установка», «Сборка», «Изготовление» в норме. «Положить плитку» → «Устройство покрытий из плит». Не отбрасывай кандидата с релевантным score только из-за глагола.
 
 ## Формат propose_rate_set (СТРОГО)
 Все поля обязательны. UUID берутся ТОЛЬКО из переданных данных. Источник строго "fsnb".
@@ -88,8 +128,8 @@ export const FALLBACK_RATE_RECOMMENDER_PROMPT_FSNB = `Ты — эксперт-с
 ## Важные правила
 - ВСЕГДА указывай suggested_category_id и suggested_type_id из стартового контекста.
 - НЕ предлагай расценки с source="imported" или "custom" — они вне области поиска.
-- НЕ повторяй одинаковые tool-вызовы.
-- После propose_rate_set диалог продолжается — пользователь может попросить корректировки.`;
+- НЕ повторяй одинаковые tool-вызовы с тем же query.
+- Если пользователь просит «найди ещё» с указанием уже предложенных id — НЕ предлагай их повторно, ищи с другими формулировками.`;
 
 /**
  * Вариант промпта для режима «Только 1С». ФСНБ недоступен, tools по нему
@@ -99,27 +139,38 @@ export const FALLBACK_RATE_RECOMMENDER_PROMPT_FSNB = `Ты — эксперт-с
 export const FALLBACK_RATE_RECOMMENDER_PROMPT_IMPORTED = `Ты — эксперт-сметчик строительного производства. Ведёшь диалог с пользователем, чтобы подобрать набор расценок для описанных им работ. Область поиска ОГРАНИЧЕНА корпоративными расценками 1С (imported_rates). ФСНБ и custom в этом режиме недоступны.
 
 ## Стартовый контекст
-В первом system-сообщении тебе передана полная карта корпоративных расценок 1С:
-1. Все категории и виды затрат
-2. Все imported_rates с полями id, name, unit, type_id, category_id
+В первом system-сообщении тебе передана МЕТА-карта:
+1. Категории и виды затрат (для информации)
+2. Статистика количества записей
 
-Все данные уже в контексте — tools поиска не нужны. Выбирай расценки напрямую из переданного массива.
+Сами расценки 1С в стартовом контексте НЕ перечислены — их более 1000. Получай их через tool search_rates_semantic.
 
 ## Алгоритм работы
 
-1. Прочитай описание работ. Если неоднозначно — задай 1–2 коротких уточняющих вопроса (не больше за раз).
-2. Просмотри категории/виды и сопоставь описание с именами расценок в imported_rates_1s.
-3. Отбери 3–7 наиболее релевантных.
-4. Вызови terminal tool propose_rate_set. В поле source всех расценок используй ТОЛЬКО "imported". source_id — это id из imported_rates_1s.
+### Шаг 1 (ВСЕГДА): поиск
+Вызови search_rates_semantic({ query: "<описание работ>", source: "imported", limit: 30 }). Tool вернёт массив imported с обогащёнными полями category_id/category_name/type_id/type_name и score.
+
+### Шаг 2: финальное предложение
+Отбери ВСЕ релевантные кандидаты (см. блок «Полнота») и вызови terminal tool propose_rate_set. В поле source ТОЛЬКО "imported", source_id — id из результатов search_rates_semantic.
+
+## Полнота результата (КРИТИЧНО)
+- search_rates_semantic с limit: 30 минимум.
+- В типичном запросе релевантных расценок 8-15. Если предлагаешь меньше 5 — вероятно, не дочитал результаты.
+- Можно вызвать search_rates_semantic несколько раз с разными формулировками (синонимами), чтобы расширить охват.
+- propose_rate_set может содержать 15-20 элементов — это нормально.
+- Никогда не останавливайся на первых 5-7.
+
+## Терминологический хинт
+В 1С названия часто неформальные, но всё же могут отличаться от речи. Пробуй синонимы: «устройство»/«монтаж»/«установка», «отделка»/«облицовка».
 
 ## Формат propose_rate_set (СТРОГО)
 Все поля обязательны. UUID берутся ТОЛЬКО из переданных данных. Источник строго "imported". Поле code = null (у 1С нет кодов).
 
 ## Важные правила
-- ВСЕГДА указывай suggested_category_id и suggested_type_id (бери их прямо из выбранной расценки).
+- ВСЕГДА указывай suggested_category_id и suggested_type_id (бери их прямо из результата search_rates_semantic).
 - НЕ предлагай расценки с source="fsnb" или "custom" — они вне области поиска.
-- Не вызывай tools поиска — данных в стартовом контексте достаточно.
-- После propose_rate_set диалог продолжается — пользователь может попросить корректировки.`;
+- НЕ повторяй одинаковые tool-вызовы с тем же query.
+- Если пользователь просит «найди ещё» с указанием уже предложенных id — НЕ предлагай их повторно, ищи с другими формулировками.`;
 
 const PROMPT_KEY_BY_SCOPE: Record<RateSearchScope, string> = {
   both: 'rate_recommender_system',
@@ -163,11 +214,15 @@ export async function loadRateRecommenderPrompt(scope: RateSearchScope = 'both')
  * Формирует компактный JSON-блок с картой территории, который добавляется
  * в system-сообщение перед началом диалога.
  *
- * Содержит:
- *  - дерево ФСНБ до уровня таблиц
- *  - все категории и виды затрат
- *  - все imported_rates (1С)
- *  - все custom_rates
+ * Содержит ТОЛЬКО метаданные:
+ *  - дерево ФСНБ до уровня таблиц (без названий норм — их получает search_rates_semantic)
+ *  - все категории и виды затрат (нужны LLM для заполнения suggested_category_id/type_id)
+ *  - small custom_rates (≤ 50 шт) — слишком мало, чтобы тратить tool-call
+ *  - статистика
+ *
+ * Полные списки fsnbNorms и importedRates НЕ встраиваются — это делало контекст
+ * ~280 KB и создавало асимметрию (ФСНБ — только структура, 1С — целиком). Теперь
+ * оба источника поднимаются через единый tool search_rates_semantic.
  */
 export function buildStartContext(
   snapshot: RateContextSnapshot,
@@ -189,17 +244,8 @@ export function buildStartContext(
     name: t.name,
   }));
 
-  const importedPayload = includeImported
-    ? snapshot.importedRates.map((r) => ({
-        id: r.id,
-        name: r.work_name,
-        unit: r.unit,
-        type_id: r.type_id,
-        category_id: r.category_id,
-      }))
-    : [];
-
-  const customPayload = scope === 'both'
+  // Custom-расценок обычно единицы — встраиваем целиком, чтобы не плодить tool-call
+  const customPayload = scope === 'both' && snapshot.customRates.length <= 50
     ? snapshot.customRates.map((r) => ({
         id: r.id,
         name: r.work_name,
@@ -219,11 +265,12 @@ export function buildStartContext(
     },
   };
   if (includeFsnb) block.fsnb_tree = tree;
-  if (includeImported) block.imported_rates_1s = importedPayload;
-  if (scope === 'both') block.custom_rates = customPayload;
+  if (scope === 'both' && customPayload.length > 0) block.custom_rates = customPayload;
 
   return (
-    '\n\n## Стартовая карта территории (используй её для навигации)\n\n' +
+    '\n\n## Стартовая карта территории\n\n' +
+    'Это только МЕТА-карта. Сами расценки (нормы ФСНБ и 1С) получай через tool ' +
+    '`search_rates_semantic` — они НЕ перечислены в этом блоке.\n\n' +
     '```json\n' +
     JSON.stringify(block, null, 2) +
     '\n```\n'
@@ -233,14 +280,21 @@ export function buildStartContext(
 // ── Tools агента ────────────────────────────────────────────────
 
 function buildTools(snapshot: RateContextSnapshot, scope: RateSearchScope = 'both'): AgentTool[] {
-  // Подготавливаем общий Fuse-индекс для search_fsnb_fallback
-  const fuseFsnb = new Fuse(snapshot.fsnbNorms, {
+  // Индекс fsnbNorms по id — нужен для быстрого обогащения результата searchNorms
+  // полями collection/division/table_code из локального snapshot. Заодно гарантирует
+  // фильтр whitelist v2: searchNorms() ходит в hybrid_search_norms по всей fsnb_norms,
+  // а в snapshot только is_selected=true → результаты вне whitelist отсеиваются.
+  const fsnbById = new Map(snapshot.fsnbNorms.map((n) => [n.id, n]));
+
+  // Локальный Fuse для 1С — у imported_rates нет embeddings, идём по name/unit.
+  const fuseImported = new Fuse(snapshot.importedRates, {
     keys: [
-      { name: 'name', weight: 1.0 },
-      { name: 'norm_code', weight: 0.5 },
+      { name: 'work_name', weight: 1.0 },
+      { name: 'type_name', weight: 0.4 },
+      { name: 'category_name', weight: 0.2 },
     ],
-    threshold: 0.4,
-    distance: 100,
+    threshold: 0.45,
+    distance: 200,
     minMatchCharLength: 3,
     ignoreLocation: true,
     includeScore: true,
@@ -314,35 +368,114 @@ function buildTools(snapshot: RateContextSnapshot, scope: RateSearchScope = 'bot
     },
   };
 
-  // 3. search_fsnb_fallback — локальный fuzzy-поиск
-  const fallbackTool: AgentTool = {
-    name: 'search_fsnb_fallback',
+  // 3. search_rates_semantic — главный tool: симметричный поиск по обоим источникам
+  // ФСНБ — гибридный (вектор embeddings + FTS-fallback) через ragSearch.searchNorms.
+  // 1С — локальный Fuse (у imported_rates нет embedding-колонки).
+  // Параметр source ограничивает источник; default — оба.
+  const searchSemanticTool: AgentTool = {
+    name: 'search_rates_semantic',
     description:
-      'РЕЗЕРВНЫЙ текстовый поиск по нормам ФСНБ (whitelist v2). ' +
-      'Используй ТОЛЬКО если по дереву таблиц не получилось найти подходящего. ' +
-      'Возвращает топ-N норм по релевантности.',
+      'ОСНОВНОЙ ИНСТРУМЕНТ ПОИСКА. Семантический поиск расценок по описанию работ. ' +
+      'Возвращает топ-N релевантных кандидатов с обеих сторон (ФСНБ + 1С). ' +
+      'ВСЕГДА вызывай первым шагом с описанием работ из запроса пользователя. ' +
+      'Можешь вызывать несколько раз с разными формулировками (синонимы), чтобы расширить охват.',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Поисковый запрос' },
-        limit: { type: 'number', description: 'Максимум результатов (по умолчанию 20)' },
+        query: {
+          type: 'string',
+          description:
+            'Описание работ для поиска. Используй естественный язык (как пишет пользователь). ' +
+            'Не сокращай до одного слова — больше контекста = лучше релевантность.',
+        },
+        source: {
+          type: 'string',
+          enum: ['fsnb', 'imported', 'both'],
+          description: 'Откуда искать. По умолчанию both. Используй "fsnb"/"imported" чтобы сузить.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Максимум результатов с каждого источника (по умолчанию 30, не меньше 20).',
+        },
       },
       required: ['query'],
       additionalProperties: false,
     },
     execute: async (input: unknown) => {
-      const { query, limit = 20 } = input as { query: string; limit?: number };
-      const results = fuseFsnb.search(query, { limit });
-      return results.map((r) => ({
-        id: r.item.id,
-        norm_code: r.item.norm_code,
-        name: r.item.name,
-        unit: r.item.unit,
-        score: r.score,
-        collection_code: r.item.collection_code,
-        division_code: r.item.division_code,
-        table_code: r.item.table_code,
-      }));
+      const {
+        query,
+        source = 'both',
+        limit = 30,
+      } = input as { query: string; source?: 'fsnb' | 'imported' | 'both'; limit?: number };
+
+      // Защита: если scope ограничен, форсим source
+      const effectiveSource: 'fsnb' | 'imported' | 'both' =
+        scope === 'fsnb' ? 'fsnb' : scope === 'imported' ? 'imported' : source;
+
+      const tasks: Array<Promise<unknown>> = [];
+
+      // ФСНБ — hybrid через searchNorms, фильтр по whitelist v2
+      const fsnbTask: Promise<Array<Record<string, unknown>>> =
+        effectiveSource === 'imported'
+          ? Promise.resolve([])
+          : searchNorms(query, { limit }).then((rows) =>
+              rows
+                .map((r) => {
+                  const enriched = fsnbById.get(r.id);
+                  if (!enriched) return null; // нет в whitelist v2
+                  return {
+                    source: 'fsnb',
+                    id: enriched.id,
+                    norm_code: enriched.norm_code,
+                    name: enriched.name,
+                    unit: enriched.unit,
+                    collection_code: enriched.collection_code,
+                    division_code: enriched.division_code,
+                    table_code: enriched.table_code,
+                    score: r.score,
+                  };
+                })
+                .filter((x): x is Record<string, unknown> => x !== null),
+            ).catch((e) => {
+              console.warn('[search_rates_semantic] searchNorms failed:', e);
+              return [];
+            });
+      tasks.push(fsnbTask);
+
+      // 1С — Fuse-индекс по name/type/category
+      const importedTask: Promise<Array<Record<string, unknown>>> =
+        effectiveSource === 'fsnb'
+          ? Promise.resolve([])
+          : Promise.resolve(
+              fuseImported.search(query, { limit }).map((r) => ({
+                source: 'imported',
+                id: r.item.id,
+                name: r.item.work_name,
+                unit: r.item.unit,
+                category_id: r.item.category_id,
+                category_name: r.item.category_name,
+                type_id: r.item.type_id,
+                type_name: r.item.type_name,
+                score: r.score, // Fuse score: 0 = идеально, 1 = далеко
+              })),
+            );
+      tasks.push(importedTask);
+
+      const [fsnbResults, importedResults] = (await Promise.all(tasks)) as [
+        Array<Record<string, unknown>>,
+        Array<Record<string, unknown>>,
+      ];
+
+      return {
+        query,
+        source: effectiveSource,
+        fsnb: fsnbResults,
+        imported: importedResults,
+        hint:
+          fsnbResults.length === 0 && importedResults.length === 0
+            ? 'Ничего не найдено. Попробуй другую формулировку или синонимы (например "монтаж" вместо "устройство", "облицовка" вместо "отделка").'
+            : 'Не отбрасывай похожие — выбери ВСЕ релевантные. Для широких запросов нормально предложить 8-15 расценок.',
+      };
     },
   };
 
@@ -393,11 +526,12 @@ function buildTools(snapshot: RateContextSnapshot, scope: RateSearchScope = 'bot
     execute: async () => ({ ok: true, intercepted_by_ui: true }),
   };
 
-  // При scope='imported' ФСНБ-tools исключаются — всё в стартовом контексте.
+  // search_rates_semantic — главный универсальный поисковый инструмент во всех режимах.
+  // Для scope='imported' исключаем ФСНБ-only tools (list_fsnb_norms_in_table, get_norm_details).
   if (scope === 'imported') {
-    return [proposeTool];
+    return [searchSemanticTool, proposeTool];
   }
-  return [listNormsTool, getDetailsTool, fallbackTool, proposeTool];
+  return [searchSemanticTool, listNormsTool, getDetailsTool, proposeTool];
 }
 
 // ── Фабрика конфигурации ────────────────────────────────────────

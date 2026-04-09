@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Spin, Typography, Alert } from 'antd';
+import { Spin, Typography, Alert, Button } from 'antd';
+import { PlusCircleOutlined } from '@ant-design/icons';
 import ChatMessageList from './ChatMessageList';
 import ChatInputBar from './ChatInputBar';
 import { useRateRecommenderChat } from '../../hooks/useRateRecommenderChat';
@@ -120,6 +121,21 @@ export default function LlmChatPanel({ inDraftKeys, existingKeys, onAddToDraft }
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   LLM думает…
                 </Typography.Text>
+              </div>
+            )}
+
+            {/* Кнопка «Найти ещё подходящие» — видна только после первого
+                propose_rate_set, чтобы пользователь мог одним кликом запросить
+                расширение списка с явным исключением уже найденных id. */}
+            {!chat.loading && chat.proposedCount > 0 && (
+              <div style={{ marginTop: 16, textAlign: 'center' }}>
+                <Button
+                  icon={<PlusCircleOutlined />}
+                  onClick={() => chat.findMore()}
+                  type="dashed"
+                >
+                  Найти ещё подходящие ({chat.proposedCount} уже предложено)
+                </Button>
               </div>
             )}
           </div>
