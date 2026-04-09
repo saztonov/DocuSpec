@@ -134,7 +134,7 @@ export default function CustomRatesTab() {
   const draftCount = state.draftRows.length;
 
   return (
-    <div style={{ maxWidth: 1720, margin: '0 auto' }}>
+    <div style={{ width: '100%' }}>
       {msgCtx}
 
       <div style={{ marginBottom: 16 }}>
@@ -188,7 +188,7 @@ export default function CustomRatesTab() {
         {/* Правая колонка — корзина-черновик */}
         <div
           style={{
-            width: 460,
+            width: 680,
             flexShrink: 0,
             position: 'sticky',
             top: 16,

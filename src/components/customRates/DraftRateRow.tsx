@@ -82,48 +82,56 @@ export default function DraftRateRow({ row, categories, types, onUpdate, onRemov
         />
       </div>
 
-      <Input
-        value={row.workName}
-        onChange={(e) => onUpdate({ workName: e.target.value, status: 'editing', error: undefined })}
-        placeholder="Наименование работы"
-        size="small"
-        style={{ marginBottom: 6 }}
-      />
+      <div style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'flex-start' }}>
+        <Input.TextArea
+          value={row.workName}
+          onChange={(e) => onUpdate({ workName: e.target.value, status: 'editing', error: undefined })}
+          placeholder="Наименование работы"
+          size="small"
+          autoSize={{ minRows: 1, maxRows: 4 }}
+          style={{ flex: '1 1 auto', minWidth: 0 }}
+        />
+        <Input
+          value={row.unit}
+          onChange={(e) => onUpdate({ unit: e.target.value, status: 'editing', error: undefined })}
+          placeholder="ед."
+          size="small"
+          style={{ width: 56, flexShrink: 0 }}
+        />
+      </div>
 
-      <Input
-        value={row.unit}
-        onChange={(e) => onUpdate({ unit: e.target.value, status: 'editing', error: undefined })}
-        placeholder="Единица измерения"
-        size="small"
-        style={{ marginBottom: 6 }}
-      />
+      <div style={{ display: 'flex', gap: 6 }}>
+        <Select<string | null>
+          value={row.categoryId}
+          onChange={(v) => handleCategoryChange(v ?? null)}
+          placeholder="Категория затрат"
+          size="small"
+          style={{ flex: '0 0 40%', minWidth: 0, width: '40%' }}
+          popupMatchSelectWidth={false}
+          dropdownStyle={{ maxWidth: 600 }}
+          showSearch
+          optionFilterProp="label"
+          allowClear
+          options={categories.map((c) => ({ label: c.name, value: c.id }))}
+          status={!row.categoryId ? 'warning' : undefined}
+        />
 
-      <Select<string | null>
-        value={row.categoryId}
-        onChange={(v) => handleCategoryChange(v ?? null)}
-        placeholder="Категория затрат"
-        size="small"
-        style={{ width: '100%', marginBottom: 6 }}
-        showSearch
-        optionFilterProp="label"
-        allowClear
-        options={categories.map((c) => ({ label: c.name, value: c.id }))}
-        status={!row.categoryId ? 'warning' : undefined}
-      />
-
-      <Select<string | null>
-        value={row.typeId}
-        onChange={(v) => onUpdate({ typeId: v ?? null, status: 'editing', error: undefined })}
-        placeholder={row.categoryId ? 'Вид затрат' : 'Сначала выберите категорию'}
-        size="small"
-        style={{ width: '100%' }}
-        showSearch
-        optionFilterProp="label"
-        allowClear
-        disabled={!row.categoryId}
-        options={filteredTypes.map((t) => ({ label: t.name, value: t.id }))}
-        status={!row.typeId && row.categoryId ? 'warning' : undefined}
-      />
+        <Select<string | null>
+          value={row.typeId}
+          onChange={(v) => onUpdate({ typeId: v ?? null, status: 'editing', error: undefined })}
+          placeholder={row.categoryId ? 'Вид затрат' : 'Сначала выберите категорию'}
+          size="small"
+          style={{ flex: '1 1 60%', minWidth: 0, width: '60%' }}
+          popupMatchSelectWidth={false}
+          dropdownStyle={{ maxWidth: 600 }}
+          showSearch
+          optionFilterProp="label"
+          allowClear
+          disabled={!row.categoryId}
+          options={filteredTypes.map((t) => ({ label: t.name, value: t.id }))}
+          status={!row.typeId && row.categoryId ? 'warning' : undefined}
+        />
+      </div>
 
       {row.reasoning && (
         <Typography.Text
