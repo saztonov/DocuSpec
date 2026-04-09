@@ -48,6 +48,101 @@
           ]
         },
         {
+          "name": "custom_rates",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": false,
+              "position": 1,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "type_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": false,
+              "position": 2,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "work_name",
+              "type": "text",
+              "default": null,
+              "nullable": false,
+              "position": 3,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "unit",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 4,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "source_kind",
+              "type": "text",
+              "default": null,
+              "nullable": false,
+              "position": 5,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "source_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": true,
+              "position": 6,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "source_code",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 7,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "comment",
+              "type": "text",
+              "default": null,
+              "nullable": true,
+              "position": 8,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "default": "now()",
+              "nullable": false,
+              "position": 9,
+              "max_length": null,
+              "numeric_precision": null
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamp with time zone",
+              "default": "now()",
+              "nullable": false,
+              "position": 10,
+              "max_length": null,
+              "numeric_precision": null
+            }
+          ]
+        },
+        {
           "name": "dependency_flags",
           "columns": [
             {
@@ -3944,6 +4039,21 @@
           "table_name": "_stg_resources_to_deactivate"
         },
         {
+          "name": "custom_rates_pkey",
+          "definition": "CREATE UNIQUE INDEX custom_rates_pkey ON public.custom_rates USING btree (id)",
+          "table_name": "custom_rates"
+        },
+        {
+          "name": "idx_custom_rates_type",
+          "definition": "CREATE INDEX idx_custom_rates_type ON public.custom_rates USING btree (type_id)",
+          "table_name": "custom_rates"
+        },
+        {
+          "name": "uq_custom_rates_source",
+          "definition": "CREATE UNIQUE INDEX uq_custom_rates_source ON public.custom_rates USING btree (source_kind, source_id) WHERE (source_id IS NOT NULL)",
+          "table_name": "custom_rates"
+        },
+        {
           "name": "dependency_flags_pkey",
           "definition": "CREATE UNIQUE INDEX dependency_flags_pkey ON public.dependency_flags USING btree (id)",
           "table_name": "dependency_flags"
@@ -4540,31 +4650,22 @@
         }
       ],
       "policies": [],
-      "triggers": [],
+      "triggers": [
+        {
+          "name": "trg_custom_rates_updated_at",
+          "event": "UPDATE",
+          "timing": "BEFORE",
+          "statement": "EXECUTE FUNCTION custom_rates_set_updated_at()",
+          "table_name": "custom_rates",
+          "orientation": "ROW"
+        }
+      ],
       "functions": [
         {
           "name": "array_to_halfvec",
           "source": "array_to_halfvec",
           "language": "c",
           "security": "INVOKER",
-          "arguments": "real[], integer, boolean",
-          "volatility": "IMMUTABLE",
-          "return_type": "halfvec"
-        },
-        {
-          "name": "array_to_halfvec",
-          "source": "array_to_halfvec",
-          "language": "c",
-          "security": "INVOKER",
-          "arguments": "numeric[], integer, boolean",
-          "volatility": "IMMUTABLE",
-          "return_type": "halfvec"
-        },
-        {
-          "name": "array_to_halfvec",
-          "source": "array_to_halfvec",
-          "language": "c",
-          "security": "INVOKER",
           "arguments": "integer[], integer, boolean",
           "volatility": "IMMUTABLE",
           "return_type": "halfvec"
@@ -4579,13 +4680,22 @@
           "return_type": "halfvec"
         },
         {
-          "name": "array_to_sparsevec",
-          "source": "array_to_sparsevec",
+          "name": "array_to_halfvec",
+          "source": "array_to_halfvec",
+          "language": "c",
+          "security": "INVOKER",
+          "arguments": "real[], integer, boolean",
+          "volatility": "IMMUTABLE",
+          "return_type": "halfvec"
+        },
+        {
+          "name": "array_to_halfvec",
+          "source": "array_to_halfvec",
           "language": "c",
           "security": "INVOKER",
           "arguments": "numeric[], integer, boolean",
           "volatility": "IMMUTABLE",
-          "return_type": "sparsevec"
+          "return_type": "halfvec"
         },
         {
           "name": "array_to_sparsevec",
@@ -4615,13 +4725,13 @@
           "return_type": "sparsevec"
         },
         {
-          "name": "array_to_vector",
-          "source": "array_to_vector",
+          "name": "array_to_sparsevec",
+          "source": "array_to_sparsevec",
           "language": "c",
           "security": "INVOKER",
-          "arguments": "double precision[], integer, boolean",
+          "arguments": "numeric[], integer, boolean",
           "volatility": "IMMUTABLE",
-          "return_type": "vector"
+          "return_type": "sparsevec"
         },
         {
           "name": "array_to_vector",
@@ -4637,7 +4747,7 @@
           "source": "array_to_vector",
           "language": "c",
           "security": "INVOKER",
-          "arguments": "numeric[], integer, boolean",
+          "arguments": "double precision[], integer, boolean",
           "volatility": "IMMUTABLE",
           "return_type": "vector"
         },
@@ -4651,11 +4761,11 @@
           "return_type": "vector"
         },
         {
-          "name": "avg",
-          "source": "aggregate_dummy",
-          "language": "internal",
+          "name": "array_to_vector",
+          "source": "array_to_vector",
+          "language": "c",
           "security": "INVOKER",
-          "arguments": "vector",
+          "arguments": "numeric[], integer, boolean",
           "volatility": "IMMUTABLE",
           "return_type": "vector"
         },
@@ -4667,6 +4777,15 @@
           "arguments": "halfvec",
           "volatility": "IMMUTABLE",
           "return_type": "halfvec"
+        },
+        {
+          "name": "avg",
+          "source": "aggregate_dummy",
+          "language": "internal",
+          "security": "INVOKER",
+          "arguments": "vector",
+          "volatility": "IMMUTABLE",
+          "return_type": "vector"
         },
         {
           "name": "binary_quantize",
@@ -4688,19 +4807,19 @@
         },
         {
           "name": "cosine_distance",
-          "source": "cosine_distance",
+          "source": "halfvec_cosine_distance",
           "language": "c",
           "security": "INVOKER",
-          "arguments": "vector, vector",
+          "arguments": "halfvec, halfvec",
           "volatility": "IMMUTABLE",
           "return_type": "double precision"
         },
         {
           "name": "cosine_distance",
-          "source": "halfvec_cosine_distance",
+          "source": "cosine_distance",
           "language": "c",
           "security": "INVOKER",
-          "arguments": "halfvec, halfvec",
+          "arguments": "vector, vector",
           "volatility": "IMMUTABLE",
           "return_type": "double precision"
         },
@@ -4712,6 +4831,15 @@
           "arguments": "sparsevec, sparsevec",
           "volatility": "IMMUTABLE",
           "return_type": "double precision"
+        },
+        {
+          "name": "custom_rates_set_updated_at",
+          "source": "\r\nBEGIN\r\n    NEW.updated_at = now();\r\n    RETURN NEW;\r\nEND;\r\n",
+          "language": "plpgsql",
+          "security": "INVOKER",
+          "arguments": "",
+          "volatility": "VOLATILE",
+          "return_type": "trigger"
         },
         {
           "name": "fsnb_collection_divisions",
@@ -5201,19 +5329,19 @@
         },
         {
           "name": "inner_product",
-          "source": "halfvec_inner_product",
+          "source": "sparsevec_inner_product",
           "language": "c",
           "security": "INVOKER",
-          "arguments": "halfvec, halfvec",
+          "arguments": "sparsevec, sparsevec",
           "volatility": "IMMUTABLE",
           "return_type": "double precision"
         },
         {
           "name": "inner_product",
-          "source": "sparsevec_inner_product",
+          "source": "halfvec_inner_product",
           "language": "c",
           "security": "INVOKER",
-          "arguments": "sparsevec, sparsevec",
+          "arguments": "halfvec, halfvec",
           "volatility": "IMMUTABLE",
           "return_type": "double precision"
         },
@@ -5264,15 +5392,6 @@
         },
         {
           "name": "l1_distance",
-          "source": "l1_distance",
-          "language": "c",
-          "security": "INVOKER",
-          "arguments": "vector, vector",
-          "volatility": "IMMUTABLE",
-          "return_type": "double precision"
-        },
-        {
-          "name": "l1_distance",
           "source": "sparsevec_l1_distance",
           "language": "c",
           "security": "INVOKER",
@@ -5282,25 +5401,16 @@
         },
         {
           "name": "l1_distance",
+          "source": "l1_distance",
+          "language": "c",
+          "security": "INVOKER",
+          "arguments": "vector, vector",
+          "volatility": "IMMUTABLE",
+          "return_type": "double precision"
+        },
+        {
+          "name": "l1_distance",
           "source": "halfvec_l1_distance",
-          "language": "c",
-          "security": "INVOKER",
-          "arguments": "halfvec, halfvec",
-          "volatility": "IMMUTABLE",
-          "return_type": "double precision"
-        },
-        {
-          "name": "l2_distance",
-          "source": "sparsevec_l2_distance",
-          "language": "c",
-          "security": "INVOKER",
-          "arguments": "sparsevec, sparsevec",
-          "volatility": "IMMUTABLE",
-          "return_type": "double precision"
-        },
-        {
-          "name": "l2_distance",
-          "source": "halfvec_l2_distance",
           "language": "c",
           "security": "INVOKER",
           "arguments": "halfvec, halfvec",
@@ -5317,11 +5427,20 @@
           "return_type": "double precision"
         },
         {
-          "name": "l2_norm",
-          "source": "sparsevec_l2_norm",
+          "name": "l2_distance",
+          "source": "halfvec_l2_distance",
           "language": "c",
           "security": "INVOKER",
-          "arguments": "sparsevec",
+          "arguments": "halfvec, halfvec",
+          "volatility": "IMMUTABLE",
+          "return_type": "double precision"
+        },
+        {
+          "name": "l2_distance",
+          "source": "sparsevec_l2_distance",
+          "language": "c",
+          "security": "INVOKER",
+          "arguments": "sparsevec, sparsevec",
           "volatility": "IMMUTABLE",
           "return_type": "double precision"
         },
@@ -5335,13 +5454,22 @@
           "return_type": "double precision"
         },
         {
-          "name": "l2_normalize",
-          "source": "l2_normalize",
+          "name": "l2_norm",
+          "source": "sparsevec_l2_norm",
           "language": "c",
           "security": "INVOKER",
-          "arguments": "vector",
+          "arguments": "sparsevec",
           "volatility": "IMMUTABLE",
-          "return_type": "vector"
+          "return_type": "double precision"
+        },
+        {
+          "name": "l2_normalize",
+          "source": "sparsevec_l2_normalize",
+          "language": "c",
+          "security": "INVOKER",
+          "arguments": "sparsevec",
+          "volatility": "IMMUTABLE",
+          "return_type": "sparsevec"
         },
         {
           "name": "l2_normalize",
@@ -5354,12 +5482,12 @@
         },
         {
           "name": "l2_normalize",
-          "source": "sparsevec_l2_normalize",
+          "source": "l2_normalize",
           "language": "c",
           "security": "INVOKER",
-          "arguments": "sparsevec",
+          "arguments": "vector",
           "volatility": "IMMUTABLE",
-          "return_type": "sparsevec"
+          "return_type": "vector"
         },
         {
           "name": "pgrst_reload_schema",
@@ -5969,6 +6097,17 @@
       "foreign_keys": [
         {
           "columns": [
+            "type_id"
+          ],
+          "table_name": "custom_rates",
+          "constraint_name": "custom_rates_type_id_fkey",
+          "references_table": "imported_rate_types",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "doc_id"
           ],
           "table_name": "dependency_flags",
@@ -5991,22 +6130,22 @@
         },
         {
           "columns": [
-            "doc_id"
+            "page_id"
           ],
           "table_name": "doc_blocks",
-          "constraint_name": "doc_blocks_doc_id_fkey",
-          "references_table": "documents",
+          "constraint_name": "doc_blocks_page_id_fkey",
+          "references_table": "doc_pages",
           "references_columns": [
             "id"
           ]
         },
         {
           "columns": [
-            "page_id"
+            "doc_id"
           ],
           "table_name": "doc_blocks",
-          "constraint_name": "doc_blocks_page_id_fkey",
-          "references_table": "doc_pages",
+          "constraint_name": "doc_blocks_doc_id_fkey",
+          "references_table": "documents",
           "references_columns": [
             "id"
           ]
@@ -6046,22 +6185,22 @@
         },
         {
           "columns": [
-            "project_id"
+            "section_id"
           ],
           "table_name": "documents",
-          "constraint_name": "documents_project_id_fkey",
-          "references_table": "projects",
+          "constraint_name": "documents_section_id_fkey",
+          "references_table": "sections",
           "references_columns": [
             "id"
           ]
         },
         {
           "columns": [
-            "section_id"
+            "project_id"
           ],
           "table_name": "documents",
-          "constraint_name": "documents_section_id_fkey",
-          "references_table": "sections",
+          "constraint_name": "documents_project_id_fkey",
+          "references_table": "projects",
           "references_columns": [
             "id"
           ]
@@ -6101,17 +6240,6 @@
         },
         {
           "columns": [
-            "fsnb_norm_id"
-          ],
-          "table_name": "estimate_rate_matches",
-          "constraint_name": "estimate_rate_matches_fsnb_norm_id_fkey",
-          "references_table": "fsnb_norms",
-          "references_columns": [
-            "id"
-          ]
-        },
-        {
-          "columns": [
             "estimate_id"
           ],
           "table_name": "estimate_rate_matches",
@@ -6123,11 +6251,33 @@
         },
         {
           "columns": [
+            "fsnb_norm_id"
+          ],
+          "table_name": "estimate_rate_matches",
+          "constraint_name": "estimate_rate_matches_fsnb_norm_id_fkey",
+          "references_table": "fsnb_norms",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "work_item_id"
           ],
           "table_name": "estimate_rate_matches",
           "constraint_name": "estimate_rate_matches_work_item_id_fkey",
           "references_table": "estimate_work_items",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "estimate_id"
+          ],
+          "table_name": "estimate_resource_matches",
+          "constraint_name": "estimate_resource_matches_estimate_id_fkey",
+          "references_table": "estimates",
           "references_columns": [
             "id"
           ]
@@ -6180,42 +6330,9 @@
           "columns": [
             "estimate_id"
           ],
-          "table_name": "estimate_resource_matches",
-          "constraint_name": "estimate_resource_matches_estimate_id_fkey",
-          "references_table": "estimates",
-          "references_columns": [
-            "id"
-          ]
-        },
-        {
-          "columns": [
-            "related_rate_match_id"
-          ],
-          "table_name": "estimate_review_queue",
-          "constraint_name": "estimate_review_queue_related_rate_match_id_fkey",
-          "references_table": "estimate_rate_matches",
-          "references_columns": [
-            "id"
-          ]
-        },
-        {
-          "columns": [
-            "estimate_id"
-          ],
           "table_name": "estimate_review_queue",
           "constraint_name": "estimate_review_queue_estimate_id_fkey",
           "references_table": "estimates",
-          "references_columns": [
-            "id"
-          ]
-        },
-        {
-          "columns": [
-            "related_resource_match_id"
-          ],
-          "table_name": "estimate_review_queue",
-          "constraint_name": "estimate_review_queue_related_resource_match_id_fkey",
-          "references_table": "estimate_resource_matches",
           "references_columns": [
             "id"
           ]
@@ -6244,6 +6361,28 @@
         },
         {
           "columns": [
+            "related_resource_match_id"
+          ],
+          "table_name": "estimate_review_queue",
+          "constraint_name": "estimate_review_queue_related_resource_match_id_fkey",
+          "references_table": "estimate_resource_matches",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "related_rate_match_id"
+          ],
+          "table_name": "estimate_review_queue",
+          "constraint_name": "estimate_review_queue_related_rate_match_id_fkey",
+          "references_table": "estimate_rate_matches",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "estimate_id"
           ],
           "table_name": "estimate_work_items",
@@ -6255,22 +6394,22 @@
         },
         {
           "columns": [
-            "doc_id"
+            "project_id"
           ],
           "table_name": "estimates",
-          "constraint_name": "estimates_doc_id_fkey",
-          "references_table": "documents",
+          "constraint_name": "estimates_project_id_fkey",
+          "references_table": "projects",
           "references_columns": [
             "id"
           ]
         },
         {
           "columns": [
-            "project_id"
+            "doc_id"
           ],
           "table_name": "estimates",
-          "constraint_name": "estimates_project_id_fkey",
-          "references_table": "projects",
+          "constraint_name": "estimates_doc_id_fkey",
+          "references_table": "documents",
           "references_columns": [
             "id"
           ]
@@ -6299,17 +6438,6 @@
         },
         {
           "columns": [
-            "tg_id"
-          ],
-          "table_name": "fsnb_norm_tech_groups",
-          "constraint_name": "fsnb_norm_tech_groups_tg_id_fkey",
-          "references_table": "fsnb_tech_groups",
-          "references_columns": [
-            "id"
-          ]
-        },
-        {
-          "columns": [
             "norm_id"
           ],
           "table_name": "fsnb_norm_tech_groups",
@@ -6321,10 +6449,32 @@
         },
         {
           "columns": [
+            "tg_id"
+          ],
+          "table_name": "fsnb_norm_tech_groups",
+          "constraint_name": "fsnb_norm_tech_groups_tg_id_fkey",
+          "references_table": "fsnb_tech_groups",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "collection_id"
           ],
           "table_name": "fsnb_norms",
           "constraint_name": "fsnb_norms_collection_id_fkey",
+          "references_table": "fsnb_collections",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "collection_id"
+          ],
+          "table_name": "fsnb_profile_collections",
+          "constraint_name": "fsnb_profile_collections_collection_id_fkey",
           "references_table": "fsnb_collections",
           "references_columns": [
             "id"
@@ -6345,31 +6495,9 @@
           "columns": [
             "collection_id"
           ],
-          "table_name": "fsnb_profile_collections",
-          "constraint_name": "fsnb_profile_collections_collection_id_fkey",
-          "references_table": "fsnb_collections",
-          "references_columns": [
-            "id"
-          ]
-        },
-        {
-          "columns": [
-            "collection_id"
-          ],
           "table_name": "fsnb_resources",
           "constraint_name": "fsnb_resources_collection_id_fkey",
           "references_table": "fsnb_collections",
-          "references_columns": [
-            "id"
-          ]
-        },
-        {
-          "columns": [
-            "tg_id"
-          ],
-          "table_name": "fsnb_tg_resources",
-          "constraint_name": "fsnb_tg_resources_tg_id_fkey",
-          "references_table": "fsnb_tech_groups",
           "references_columns": [
             "id"
           ]
@@ -6381,6 +6509,17 @@
           "table_name": "fsnb_tg_resources",
           "constraint_name": "fsnb_tg_resources_resource_id_fkey",
           "references_table": "fsnb_resources",
+          "references_columns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "tg_id"
+          ],
+          "table_name": "fsnb_tg_resources",
+          "constraint_name": "fsnb_tg_resources_tg_id_fkey",
+          "references_table": "fsnb_tech_groups",
           "references_columns": [
             "id"
           ]
@@ -6519,22 +6658,22 @@
         },
         {
           "columns": [
-            "doc_id"
+            "section_id"
           ],
           "table_name": "statements",
-          "constraint_name": "statements_doc_id_fkey",
-          "references_table": "documents",
+          "constraint_name": "statements_section_id_fkey",
+          "references_table": "sections",
           "references_columns": [
             "id"
           ]
         },
         {
           "columns": [
-            "section_id"
+            "doc_id"
           ],
           "table_name": "statements",
-          "constraint_name": "statements_section_id_fkey",
-          "references_table": "sections",
+          "constraint_name": "statements_doc_id_fkey",
+          "references_table": "documents",
           "references_columns": [
             "id"
           ]
@@ -6562,7 +6701,7 @@
           ]
         }
       ],
-      "generated_at": "2026-04-08T09:41:41.503506+00:00",
+      "generated_at": "2026-04-09T07:47:00.321273+00:00",
       "primary_keys": [
         {
           "columns": [
@@ -6577,6 +6716,13 @@
           ],
           "table_name": "_stg_resources_to_deactivate",
           "constraint_name": "_stg_resources_to_deactivate_pkey"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "table_name": "custom_rates",
+          "constraint_name": "custom_rates_pkey"
         },
         {
           "columns": [
@@ -6850,6 +6996,41 @@
           "constraint_name": "2200_147352_1_not_null"
         },
         {
+          "table_name": "custom_rates",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_233309_9_not_null"
+        },
+        {
+          "table_name": "custom_rates",
+          "check_clause": "source_kind IS NOT NULL",
+          "constraint_name": "2200_233309_5_not_null"
+        },
+        {
+          "table_name": "custom_rates",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_233309_1_not_null"
+        },
+        {
+          "table_name": "custom_rates",
+          "check_clause": "work_name IS NOT NULL",
+          "constraint_name": "2200_233309_3_not_null"
+        },
+        {
+          "table_name": "custom_rates",
+          "check_clause": "type_id IS NOT NULL",
+          "constraint_name": "2200_233309_2_not_null"
+        },
+        {
+          "table_name": "custom_rates",
+          "check_clause": "(source_kind = ANY (ARRAY['fsnb'::text, 'imported'::text, 'custom'::text]))",
+          "constraint_name": "custom_rates_source_kind_check"
+        },
+        {
+          "table_name": "custom_rates",
+          "check_clause": "updated_at IS NOT NULL",
+          "constraint_name": "2200_233309_10_not_null"
+        },
+        {
           "table_name": "dependency_flags",
           "check_clause": "id IS NOT NULL",
           "constraint_name": "2200_33568_1_not_null"
@@ -6876,13 +7057,43 @@
         },
         {
           "table_name": "doc_blocks",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_17524_11_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_17524_1_not_null"
         },
         {
           "table_name": "doc_blocks",
           "check_clause": "(block_type = ANY (ARRAY['TEXT'::text, 'IMAGE'::text]))",
           "constraint_name": "doc_blocks_block_type_check"
+        },
+        {
+          "table_name": "doc_blocks",
+          "check_clause": "content IS NOT NULL",
+          "constraint_name": "2200_17524_6_not_null"
+        },
+        {
+          "table_name": "doc_blocks",
+          "check_clause": "has_table IS NOT NULL",
+          "constraint_name": "2200_17524_7_not_null"
+        },
+        {
+          "table_name": "doc_blocks",
+          "check_clause": "has_error IS NOT NULL",
+          "constraint_name": "2200_17524_8_not_null"
+        },
+        {
+          "table_name": "doc_blocks",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_17524_11_not_null"
+        },
+        {
+          "table_name": "doc_blocks",
+          "check_clause": "doc_id IS NOT NULL",
+          "constraint_name": "2200_17524_2_not_null"
+        },
+        {
+          "table_name": "doc_blocks",
+          "check_clause": "block_type IS NOT NULL",
+          "constraint_name": "2200_17524_5_not_null"
         },
         {
           "table_name": "doc_blocks",
@@ -6895,34 +7106,19 @@
           "constraint_name": "2200_17524_3_not_null"
         },
         {
-          "table_name": "doc_blocks",
-          "check_clause": "doc_id IS NOT NULL",
-          "constraint_name": "2200_17524_2_not_null"
+          "table_name": "doc_glossary",
+          "check_clause": "confidence IS NOT NULL",
+          "constraint_name": "2200_22245_7_not_null"
         },
         {
-          "table_name": "doc_blocks",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_17524_1_not_null"
+          "table_name": "doc_glossary",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_22245_8_not_null"
         },
         {
-          "table_name": "doc_blocks",
-          "check_clause": "has_error IS NOT NULL",
-          "constraint_name": "2200_17524_8_not_null"
-        },
-        {
-          "table_name": "doc_blocks",
-          "check_clause": "has_table IS NOT NULL",
-          "constraint_name": "2200_17524_7_not_null"
-        },
-        {
-          "table_name": "doc_blocks",
-          "check_clause": "content IS NOT NULL",
-          "constraint_name": "2200_17524_6_not_null"
-        },
-        {
-          "table_name": "doc_blocks",
-          "check_clause": "block_type IS NOT NULL",
-          "constraint_name": "2200_17524_5_not_null"
+          "table_name": "doc_glossary",
+          "check_clause": "(item_type = ANY (ARRAY['material'::text, 'assembly'::text, 'construction'::text, 'location'::text, 'color'::text]))",
+          "constraint_name": "doc_glossary_item_type_check"
         },
         {
           "table_name": "doc_glossary",
@@ -6945,21 +7141,6 @@
           "constraint_name": "2200_22245_4_not_null"
         },
         {
-          "table_name": "doc_glossary",
-          "check_clause": "confidence IS NOT NULL",
-          "constraint_name": "2200_22245_7_not_null"
-        },
-        {
-          "table_name": "doc_glossary",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_22245_8_not_null"
-        },
-        {
-          "table_name": "doc_glossary",
-          "check_clause": "(item_type = ANY (ARRAY['material'::text, 'assembly'::text, 'construction'::text, 'location'::text, 'color'::text]))",
-          "constraint_name": "doc_glossary_item_type_check"
-        },
-        {
           "table_name": "doc_pages",
           "check_clause": "doc_id IS NOT NULL",
           "constraint_name": "2200_17508_2_not_null"
@@ -6971,33 +7152,13 @@
         },
         {
           "table_name": "doc_pages",
-          "check_clause": "page_no IS NOT NULL",
-          "constraint_name": "2200_17508_3_not_null"
-        },
-        {
-          "table_name": "doc_pages",
           "check_clause": "id IS NOT NULL",
           "constraint_name": "2200_17508_1_not_null"
         },
         {
-          "table_name": "documents",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_17494_1_not_null"
-        },
-        {
-          "table_name": "documents",
-          "check_clause": "(status = ANY (ARRAY['uploaded'::text, 'parsing'::text, 'extracting'::text, 'done'::text, 'error'::text, 'has_errors'::text]))",
-          "constraint_name": "documents_status_check"
-        },
-        {
-          "table_name": "documents",
-          "check_clause": "updated_at IS NOT NULL",
-          "constraint_name": "2200_17494_13_not_null"
-        },
-        {
-          "table_name": "documents",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_17494_12_not_null"
+          "table_name": "doc_pages",
+          "check_clause": "page_no IS NOT NULL",
+          "constraint_name": "2200_17508_3_not_null"
         },
         {
           "table_name": "documents",
@@ -7006,8 +7167,18 @@
         },
         {
           "table_name": "documents",
-          "check_clause": "status IS NOT NULL",
-          "constraint_name": "2200_17494_7_not_null"
+          "check_clause": "(status = ANY (ARRAY['uploaded'::text, 'parsing'::text, 'extracting'::text, 'done'::text, 'error'::text, 'has_errors'::text]))",
+          "constraint_name": "documents_status_check"
+        },
+        {
+          "table_name": "documents",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_17494_1_not_null"
+        },
+        {
+          "table_name": "documents",
+          "check_clause": "user_id IS NOT NULL",
+          "constraint_name": "2200_17494_2_not_null"
         },
         {
           "table_name": "documents",
@@ -7016,23 +7187,23 @@
         },
         {
           "table_name": "documents",
-          "check_clause": "user_id IS NOT NULL",
-          "constraint_name": "2200_17494_2_not_null"
+          "check_clause": "status IS NOT NULL",
+          "constraint_name": "2200_17494_7_not_null"
+        },
+        {
+          "table_name": "documents",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_17494_12_not_null"
+        },
+        {
+          "table_name": "documents",
+          "check_clause": "updated_at IS NOT NULL",
+          "constraint_name": "2200_17494_13_not_null"
         },
         {
           "table_name": "estimate_lines",
           "check_clause": "created_at IS NOT NULL",
           "constraint_name": "2200_34193_19_not_null"
-        },
-        {
-          "table_name": "estimate_lines",
-          "check_clause": "description IS NOT NULL",
-          "constraint_name": "2200_34193_8_not_null"
-        },
-        {
-          "table_name": "estimate_lines",
-          "check_clause": "sort_order IS NOT NULL",
-          "constraint_name": "2200_34193_3_not_null"
         },
         {
           "table_name": "estimate_lines",
@@ -7045,14 +7216,19 @@
           "constraint_name": "2200_34193_1_not_null"
         },
         {
-          "table_name": "estimate_rate_matches",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_34123_1_not_null"
+          "table_name": "estimate_lines",
+          "check_clause": "description IS NOT NULL",
+          "constraint_name": "2200_34193_8_not_null"
+        },
+        {
+          "table_name": "estimate_lines",
+          "check_clause": "sort_order IS NOT NULL",
+          "constraint_name": "2200_34193_3_not_null"
         },
         {
           "table_name": "estimate_rate_matches",
-          "check_clause": "user_verified IS NOT NULL",
-          "constraint_name": "2200_34123_12_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_34123_1_not_null"
         },
         {
           "table_name": "estimate_rate_matches",
@@ -7066,8 +7242,13 @@
         },
         {
           "table_name": "estimate_rate_matches",
-          "check_clause": "work_item_id IS NOT NULL",
-          "constraint_name": "2200_34123_3_not_null"
+          "check_clause": "user_verified IS NOT NULL",
+          "constraint_name": "2200_34123_12_not_null"
+        },
+        {
+          "table_name": "estimate_rate_matches",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_34123_15_not_null"
         },
         {
           "table_name": "estimate_rate_matches",
@@ -7076,23 +7257,8 @@
         },
         {
           "table_name": "estimate_rate_matches",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_34123_15_not_null"
-        },
-        {
-          "table_name": "estimate_resource_matches",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_34153_1_not_null"
-        },
-        {
-          "table_name": "estimate_resource_matches",
-          "check_clause": "user_verified IS NOT NULL",
-          "constraint_name": "2200_34153_15_not_null"
-        },
-        {
-          "table_name": "estimate_resource_matches",
-          "check_clause": "material_fact_id IS NOT NULL",
-          "constraint_name": "2200_34153_3_not_null"
+          "check_clause": "work_item_id IS NOT NULL",
+          "constraint_name": "2200_34123_3_not_null"
         },
         {
           "table_name": "estimate_resource_matches",
@@ -7101,13 +7267,23 @@
         },
         {
           "table_name": "estimate_resource_matches",
+          "check_clause": "estimate_id IS NOT NULL",
+          "constraint_name": "2200_34153_2_not_null"
+        },
+        {
+          "table_name": "estimate_resource_matches",
+          "check_clause": "material_fact_id IS NOT NULL",
+          "constraint_name": "2200_34153_3_not_null"
+        },
+        {
+          "table_name": "estimate_resource_matches",
           "check_clause": "needs_review IS NOT NULL",
           "constraint_name": "2200_34153_14_not_null"
         },
         {
           "table_name": "estimate_resource_matches",
-          "check_clause": "estimate_id IS NOT NULL",
-          "constraint_name": "2200_34153_2_not_null"
+          "check_clause": "user_verified IS NOT NULL",
+          "constraint_name": "2200_34153_15_not_null"
         },
         {
           "table_name": "estimate_resource_matches",
@@ -7115,14 +7291,9 @@
           "constraint_name": "2200_34153_18_not_null"
         },
         {
-          "table_name": "estimate_review_queue",
+          "table_name": "estimate_resource_matches",
           "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_34219_1_not_null"
-        },
-        {
-          "table_name": "estimate_review_queue",
-          "check_clause": "resolved IS NOT NULL",
-          "constraint_name": "2200_34219_11_not_null"
+          "constraint_name": "2200_34153_1_not_null"
         },
         {
           "table_name": "estimate_review_queue",
@@ -7150,24 +7321,24 @@
           "constraint_name": "2200_34219_5_not_null"
         },
         {
-          "table_name": "estimate_work_items",
-          "check_clause": "work_description IS NOT NULL",
-          "constraint_name": "2200_34106_3_not_null"
+          "table_name": "estimate_review_queue",
+          "check_clause": "resolved IS NOT NULL",
+          "constraint_name": "2200_34219_11_not_null"
         },
         {
-          "table_name": "estimate_work_items",
-          "check_clause": "confidence IS NOT NULL",
-          "constraint_name": "2200_34106_8_not_null"
-        },
-        {
-          "table_name": "estimate_work_items",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_34106_12_not_null"
+          "table_name": "estimate_review_queue",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_34219_1_not_null"
         },
         {
           "table_name": "estimate_work_items",
           "check_clause": "needs_review IS NOT NULL",
           "constraint_name": "2200_34106_9_not_null"
+        },
+        {
+          "table_name": "estimate_work_items",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_34106_12_not_null"
         },
         {
           "table_name": "estimate_work_items",
@@ -7180,9 +7351,39 @@
           "constraint_name": "2200_34106_2_not_null"
         },
         {
+          "table_name": "estimate_work_items",
+          "check_clause": "work_description IS NOT NULL",
+          "constraint_name": "2200_34106_3_not_null"
+        },
+        {
+          "table_name": "estimate_work_items",
+          "check_clause": "confidence IS NOT NULL",
+          "constraint_name": "2200_34106_8_not_null"
+        },
+        {
+          "table_name": "estimates",
+          "check_clause": "status IS NOT NULL",
+          "constraint_name": "2200_34078_5_not_null"
+        },
+        {
+          "table_name": "estimates",
+          "check_clause": "doc_id IS NOT NULL",
+          "constraint_name": "2200_34078_2_not_null"
+        },
+        {
           "table_name": "estimates",
           "check_clause": "id IS NOT NULL",
           "constraint_name": "2200_34078_1_not_null"
+        },
+        {
+          "table_name": "estimates",
+          "check_clause": "prompt_tokens IS NOT NULL",
+          "constraint_name": "2200_34078_15_not_null"
+        },
+        {
+          "table_name": "estimates",
+          "check_clause": "completion_tokens IS NOT NULL",
+          "constraint_name": "2200_34078_16_not_null"
         },
         {
           "table_name": "estimates",
@@ -7201,33 +7402,13 @@
         },
         {
           "table_name": "estimates",
-          "check_clause": "completion_tokens IS NOT NULL",
-          "constraint_name": "2200_34078_16_not_null"
-        },
-        {
-          "table_name": "estimates",
-          "check_clause": "prompt_tokens IS NOT NULL",
-          "constraint_name": "2200_34078_15_not_null"
-        },
-        {
-          "table_name": "estimates",
           "check_clause": "iteration_count IS NOT NULL",
           "constraint_name": "2200_34078_13_not_null"
         },
         {
           "table_name": "estimates",
-          "check_clause": "status IS NOT NULL",
-          "constraint_name": "2200_34078_5_not_null"
-        },
-        {
-          "table_name": "estimates",
           "check_clause": "name IS NOT NULL",
           "constraint_name": "2200_34078_4_not_null"
-        },
-        {
-          "table_name": "estimates",
-          "check_clause": "doc_id IS NOT NULL",
-          "constraint_name": "2200_34078_2_not_null"
         },
         {
           "table_name": "fsnb_collections",
@@ -7236,8 +7417,8 @@
         },
         {
           "table_name": "fsnb_collections",
-          "check_clause": "name IS NOT NULL",
-          "constraint_name": "2200_33918_3_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_33918_1_not_null"
         },
         {
           "table_name": "fsnb_collections",
@@ -7246,8 +7427,8 @@
         },
         {
           "table_name": "fsnb_collections",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_33918_1_not_null"
+          "check_clause": "name IS NOT NULL",
+          "constraint_name": "2200_33918_3_not_null"
         },
         {
           "table_name": "fsnb_collections",
@@ -7256,13 +7437,8 @@
         },
         {
           "table_name": "fsnb_norm_resources",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_33976_1_not_null"
-        },
-        {
-          "table_name": "fsnb_norm_resources",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_33976_9_not_null"
+          "check_clause": "norm_id IS NOT NULL",
+          "constraint_name": "2200_33976_2_not_null"
         },
         {
           "table_name": "fsnb_norm_resources",
@@ -7271,13 +7447,13 @@
         },
         {
           "table_name": "fsnb_norm_resources",
-          "check_clause": "norm_id IS NOT NULL",
-          "constraint_name": "2200_33976_2_not_null"
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_33976_9_not_null"
         },
         {
-          "table_name": "fsnb_norm_tech_groups",
-          "check_clause": "norm_base_type IS NOT NULL",
-          "constraint_name": "2200_34032_4_not_null"
+          "table_name": "fsnb_norm_resources",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_33976_1_not_null"
         },
         {
           "table_name": "fsnb_norm_tech_groups",
@@ -7286,13 +7462,28 @@
         },
         {
           "table_name": "fsnb_norm_tech_groups",
-          "check_clause": "norm_code IS NOT NULL",
-          "constraint_name": "2200_34032_3_not_null"
+          "check_clause": "norm_base_type IS NOT NULL",
+          "constraint_name": "2200_34032_4_not_null"
         },
         {
           "table_name": "fsnb_norm_tech_groups",
           "check_clause": "tg_id IS NOT NULL",
           "constraint_name": "2200_34032_5_not_null"
+        },
+        {
+          "table_name": "fsnb_norm_tech_groups",
+          "check_clause": "norm_code IS NOT NULL",
+          "constraint_name": "2200_34032_3_not_null"
+        },
+        {
+          "table_name": "fsnb_norms",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_33953_19_not_null"
+        },
+        {
+          "table_name": "fsnb_norms",
+          "check_clause": "is_active IS NOT NULL",
+          "constraint_name": "2200_33953_21_not_null"
         },
         {
           "table_name": "fsnb_norms",
@@ -7326,18 +7517,8 @@
         },
         {
           "table_name": "fsnb_norms",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_33953_19_not_null"
-        },
-        {
-          "table_name": "fsnb_norms",
           "check_clause": "updated_at IS NOT NULL",
           "constraint_name": "2200_33953_20_not_null"
-        },
-        {
-          "table_name": "fsnb_norms",
-          "check_clause": "is_active IS NOT NULL",
-          "constraint_name": "2200_33953_21_not_null"
         },
         {
           "table_name": "fsnb_price_indices",
@@ -7346,8 +7527,8 @@
         },
         {
           "table_name": "fsnb_price_indices",
-          "check_clause": "period IS NOT NULL",
-          "constraint_name": "2200_34055_4_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_34055_1_not_null"
         },
         {
           "table_name": "fsnb_price_indices",
@@ -7356,13 +7537,8 @@
         },
         {
           "table_name": "fsnb_price_indices",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_34055_1_not_null"
-        },
-        {
-          "table_name": "fsnb_profile_collections",
-          "check_clause": "(mode = ANY (ARRAY['full'::text, 'partial'::text, 'exclude'::text]))",
-          "constraint_name": "fsnb_profile_collections_mode_check"
+          "check_clause": "period IS NOT NULL",
+          "constraint_name": "2200_34055_4_not_null"
         },
         {
           "table_name": "fsnb_profile_collections",
@@ -7376,8 +7552,8 @@
         },
         {
           "table_name": "fsnb_profile_collections",
-          "check_clause": "collection_id IS NOT NULL",
-          "constraint_name": "2200_147163_2_not_null"
+          "check_clause": "(mode = ANY (ARRAY['full'::text, 'partial'::text, 'exclude'::text]))",
+          "constraint_name": "fsnb_profile_collections_mode_check"
         },
         {
           "table_name": "fsnb_profile_collections",
@@ -7385,14 +7561,14 @@
           "constraint_name": "2200_147163_1_not_null"
         },
         {
-          "table_name": "fsnb_profiles",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_147152_5_not_null"
+          "table_name": "fsnb_profile_collections",
+          "check_clause": "collection_id IS NOT NULL",
+          "constraint_name": "2200_147163_2_not_null"
         },
         {
           "table_name": "fsnb_profiles",
-          "check_clause": "name IS NOT NULL",
-          "constraint_name": "2200_147152_3_not_null"
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_147152_5_not_null"
         },
         {
           "table_name": "fsnb_profiles",
@@ -7405,14 +7581,9 @@
           "constraint_name": "2200_147152_1_not_null"
         },
         {
-          "table_name": "fsnb_resources",
-          "check_clause": "resource_type IS NOT NULL",
-          "constraint_name": "2200_33930_6_not_null"
-        },
-        {
-          "table_name": "fsnb_resources",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_33930_25_not_null"
+          "table_name": "fsnb_profiles",
+          "check_clause": "name IS NOT NULL",
+          "constraint_name": "2200_147152_3_not_null"
         },
         {
           "table_name": "fsnb_resources",
@@ -7421,13 +7592,18 @@
         },
         {
           "table_name": "fsnb_resources",
-          "check_clause": "is_active IS NOT NULL",
-          "constraint_name": "2200_33930_27_not_null"
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_33930_25_not_null"
         },
         {
           "table_name": "fsnb_resources",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_33930_1_not_null"
+          "check_clause": "resource_type IS NOT NULL",
+          "constraint_name": "2200_33930_6_not_null"
+        },
+        {
+          "table_name": "fsnb_resources",
+          "check_clause": "name IS NOT NULL",
+          "constraint_name": "2200_33930_4_not_null"
         },
         {
           "table_name": "fsnb_resources",
@@ -7436,8 +7612,18 @@
         },
         {
           "table_name": "fsnb_resources",
-          "check_clause": "name IS NOT NULL",
-          "constraint_name": "2200_33930_4_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_33930_1_not_null"
+        },
+        {
+          "table_name": "fsnb_resources",
+          "check_clause": "is_active IS NOT NULL",
+          "constraint_name": "2200_33930_27_not_null"
+        },
+        {
+          "table_name": "fsnb_synonyms",
+          "check_clause": "canonical_term IS NOT NULL",
+          "constraint_name": "2200_34066_3_not_null"
         },
         {
           "table_name": "fsnb_synonyms",
@@ -7446,18 +7632,13 @@
         },
         {
           "table_name": "fsnb_synonyms",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_34066_5_not_null"
-        },
-        {
-          "table_name": "fsnb_synonyms",
           "check_clause": "id IS NOT NULL",
           "constraint_name": "2200_34066_1_not_null"
         },
         {
           "table_name": "fsnb_synonyms",
-          "check_clause": "canonical_term IS NOT NULL",
-          "constraint_name": "2200_34066_3_not_null"
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_34066_5_not_null"
         },
         {
           "table_name": "fsnb_tech_groups",
@@ -7476,8 +7657,8 @@
         },
         {
           "table_name": "fsnb_tg_resources",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_34010_1_not_null"
+          "check_clause": "tg_id IS NOT NULL",
+          "constraint_name": "2200_34010_2_not_null"
         },
         {
           "table_name": "fsnb_tg_resources",
@@ -7486,8 +7667,8 @@
         },
         {
           "table_name": "fsnb_tg_resources",
-          "check_clause": "tg_id IS NOT NULL",
-          "constraint_name": "2200_34010_2_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_34010_1_not_null"
         },
         {
           "table_name": "imported_rate_categories",
@@ -7511,8 +7692,8 @@
         },
         {
           "table_name": "imported_rate_types",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_175059_1_not_null"
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_175059_4_not_null"
         },
         {
           "table_name": "imported_rate_types",
@@ -7521,8 +7702,8 @@
         },
         {
           "table_name": "imported_rate_types",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_175059_4_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_175059_1_not_null"
         },
         {
           "table_name": "imported_rates",
@@ -7531,8 +7712,8 @@
         },
         {
           "table_name": "imported_rates",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_175076_5_not_null"
+          "check_clause": "type_id IS NOT NULL",
+          "constraint_name": "2200_175076_2_not_null"
         },
         {
           "table_name": "imported_rates",
@@ -7541,8 +7722,8 @@
         },
         {
           "table_name": "imported_rates",
-          "check_clause": "type_id IS NOT NULL",
-          "constraint_name": "2200_175076_2_not_null"
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_175076_5_not_null"
         },
         {
           "table_name": "llm_prompts",
@@ -7551,8 +7732,13 @@
         },
         {
           "table_name": "llm_prompts",
-          "check_clause": "is_active IS NOT NULL",
-          "constraint_name": "2200_21117_7_not_null"
+          "check_clause": "key IS NOT NULL",
+          "constraint_name": "2200_21117_2_not_null"
+        },
+        {
+          "table_name": "llm_prompts",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_21117_1_not_null"
         },
         {
           "table_name": "llm_prompts",
@@ -7566,38 +7752,13 @@
         },
         {
           "table_name": "llm_prompts",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_21117_1_not_null"
-        },
-        {
-          "table_name": "llm_prompts",
-          "check_clause": "key IS NOT NULL",
-          "constraint_name": "2200_21117_2_not_null"
+          "check_clause": "is_active IS NOT NULL",
+          "constraint_name": "2200_21117_7_not_null"
         },
         {
           "table_name": "llm_prompts",
           "check_clause": "system_prompt IS NOT NULL",
           "constraint_name": "2200_21117_5_not_null"
-        },
-        {
-          "table_name": "material_facts",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_17548_1_not_null"
-        },
-        {
-          "table_name": "material_facts",
-          "check_clause": "block_id IS NOT NULL",
-          "constraint_name": "2200_17548_3_not_null"
-        },
-        {
-          "table_name": "material_facts",
-          "check_clause": "raw_name IS NOT NULL",
-          "constraint_name": "2200_17548_4_not_null"
-        },
-        {
-          "table_name": "material_facts",
-          "check_clause": "confidence IS NOT NULL",
-          "constraint_name": "2200_17548_15_not_null"
         },
         {
           "table_name": "material_facts",
@@ -7616,8 +7777,8 @@
         },
         {
           "table_name": "material_facts",
-          "check_clause": "kind IS NOT NULL",
-          "constraint_name": "2200_17548_23_not_null"
+          "check_clause": "fact_type IS NOT NULL",
+          "constraint_name": "2200_17548_29_not_null"
         },
         {
           "table_name": "material_facts",
@@ -7626,13 +7787,33 @@
         },
         {
           "table_name": "material_facts",
-          "check_clause": "fact_type IS NOT NULL",
-          "constraint_name": "2200_17548_29_not_null"
+          "check_clause": "kind IS NOT NULL",
+          "constraint_name": "2200_17548_23_not_null"
         },
         {
           "table_name": "material_facts",
           "check_clause": "doc_id IS NOT NULL",
           "constraint_name": "2200_17548_2_not_null"
+        },
+        {
+          "table_name": "material_facts",
+          "check_clause": "block_id IS NOT NULL",
+          "constraint_name": "2200_17548_3_not_null"
+        },
+        {
+          "table_name": "material_facts",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_17548_1_not_null"
+        },
+        {
+          "table_name": "material_facts",
+          "check_clause": "raw_name IS NOT NULL",
+          "constraint_name": "2200_17548_4_not_null"
+        },
+        {
+          "table_name": "material_facts",
+          "check_clause": "confidence IS NOT NULL",
+          "constraint_name": "2200_17548_15_not_null"
         },
         {
           "table_name": "product_facts",
@@ -7641,23 +7822,18 @@
         },
         {
           "table_name": "product_facts",
+          "check_clause": "needs_review IS NOT NULL",
+          "constraint_name": "2200_22269_19_not_null"
+        },
+        {
+          "table_name": "product_facts",
           "check_clause": "source_section IS NOT NULL",
           "constraint_name": "2200_22269_9_not_null"
         },
         {
           "table_name": "product_facts",
-          "check_clause": "updated_at IS NOT NULL",
-          "constraint_name": "2200_22269_16_not_null"
-        },
-        {
-          "table_name": "product_facts",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_22269_15_not_null"
-        },
-        {
-          "table_name": "product_facts",
-          "check_clause": "needs_review IS NOT NULL",
-          "constraint_name": "2200_22269_19_not_null"
+          "check_clause": "confidence IS NOT NULL",
+          "constraint_name": "2200_22269_13_not_null"
         },
         {
           "table_name": "product_facts",
@@ -7671,8 +7847,13 @@
         },
         {
           "table_name": "product_facts",
-          "check_clause": "confidence IS NOT NULL",
-          "constraint_name": "2200_22269_13_not_null"
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_22269_15_not_null"
+        },
+        {
+          "table_name": "product_facts",
+          "check_clause": "updated_at IS NOT NULL",
+          "constraint_name": "2200_22269_16_not_null"
         },
         {
           "table_name": "product_facts",
@@ -7686,13 +7867,13 @@
         },
         {
           "table_name": "projects",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_20979_5_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_20979_1_not_null"
         },
         {
           "table_name": "projects",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_20979_1_not_null"
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_20979_5_not_null"
         },
         {
           "table_name": "projects",
@@ -7711,8 +7892,8 @@
         },
         {
           "table_name": "sections",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_20989_1_not_null"
+          "check_clause": "sort_order IS NOT NULL",
+          "constraint_name": "2200_20989_4_not_null"
         },
         {
           "table_name": "sections",
@@ -7721,8 +7902,8 @@
         },
         {
           "table_name": "sections",
-          "check_clause": "sort_order IS NOT NULL",
-          "constraint_name": "2200_20989_4_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_20989_1_not_null"
         },
         {
           "table_name": "sections",
@@ -7731,8 +7912,23 @@
         },
         {
           "table_name": "skill_examples",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_34274_1_not_null"
+        },
+        {
+          "table_name": "skill_examples",
+          "check_clause": "group_id IS NOT NULL",
+          "constraint_name": "2200_34274_2_not_null"
+        },
+        {
+          "table_name": "skill_examples",
           "check_clause": "agent_type IS NOT NULL",
           "constraint_name": "2200_34274_3_not_null"
+        },
+        {
+          "table_name": "skill_examples",
+          "check_clause": "input_text IS NOT NULL",
+          "constraint_name": "2200_34274_4_not_null"
         },
         {
           "table_name": "skill_examples",
@@ -7750,26 +7946,6 @@
           "constraint_name": "2200_34274_11_not_null"
         },
         {
-          "table_name": "skill_examples",
-          "check_clause": "group_id IS NOT NULL",
-          "constraint_name": "2200_34274_2_not_null"
-        },
-        {
-          "table_name": "skill_examples",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_34274_1_not_null"
-        },
-        {
-          "table_name": "skill_examples",
-          "check_clause": "input_text IS NOT NULL",
-          "constraint_name": "2200_34274_4_not_null"
-        },
-        {
-          "table_name": "skill_feedback",
-          "check_clause": "created_at IS NOT NULL",
-          "constraint_name": "2200_34292_9_not_null"
-        },
-        {
           "table_name": "skill_feedback",
           "check_clause": "action IS NOT NULL",
           "constraint_name": "2200_34292_5_not_null"
@@ -7785,39 +7961,9 @@
           "constraint_name": "2200_34292_1_not_null"
         },
         {
-          "table_name": "skill_registry",
-          "check_clause": "is_active IS NOT NULL",
-          "constraint_name": "2200_34256_7_not_null"
-        },
-        {
-          "table_name": "skill_registry",
-          "check_clause": "total_uses IS NOT NULL",
-          "constraint_name": "2200_34256_11_not_null"
-        },
-        {
-          "table_name": "skill_registry",
-          "check_clause": "successful_uses IS NOT NULL",
-          "constraint_name": "2200_34256_12_not_null"
-        },
-        {
-          "table_name": "skill_registry",
-          "check_clause": "rejected_uses IS NOT NULL",
-          "constraint_name": "2200_34256_13_not_null"
-        },
-        {
-          "table_name": "skill_registry",
-          "check_clause": "created_by IS NOT NULL",
-          "constraint_name": "2200_34256_16_not_null"
-        },
-        {
-          "table_name": "skill_registry",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_34256_1_not_null"
-        },
-        {
-          "table_name": "skill_registry",
-          "check_clause": "skill_type IS NOT NULL",
-          "constraint_name": "2200_34256_3_not_null"
+          "table_name": "skill_feedback",
+          "check_clause": "created_at IS NOT NULL",
+          "constraint_name": "2200_34292_9_not_null"
         },
         {
           "table_name": "skill_registry",
@@ -7831,13 +7977,43 @@
         },
         {
           "table_name": "skill_registry",
+          "check_clause": "updated_at IS NOT NULL",
+          "constraint_name": "2200_34256_19_not_null"
+        },
+        {
+          "table_name": "skill_registry",
           "check_clause": "created_at IS NOT NULL",
           "constraint_name": "2200_34256_18_not_null"
         },
         {
           "table_name": "skill_registry",
-          "check_clause": "updated_at IS NOT NULL",
-          "constraint_name": "2200_34256_19_not_null"
+          "check_clause": "created_by IS NOT NULL",
+          "constraint_name": "2200_34256_16_not_null"
+        },
+        {
+          "table_name": "skill_registry",
+          "check_clause": "rejected_uses IS NOT NULL",
+          "constraint_name": "2200_34256_13_not_null"
+        },
+        {
+          "table_name": "skill_registry",
+          "check_clause": "successful_uses IS NOT NULL",
+          "constraint_name": "2200_34256_12_not_null"
+        },
+        {
+          "table_name": "skill_registry",
+          "check_clause": "total_uses IS NOT NULL",
+          "constraint_name": "2200_34256_11_not_null"
+        },
+        {
+          "table_name": "skill_registry",
+          "check_clause": "is_active IS NOT NULL",
+          "constraint_name": "2200_34256_7_not_null"
+        },
+        {
+          "table_name": "skill_registry",
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_34256_1_not_null"
         },
         {
           "table_name": "skill_registry",
@@ -7845,14 +8021,14 @@
           "constraint_name": "2200_34256_2_not_null"
         },
         {
-          "table_name": "statement_items",
-          "check_clause": "id IS NOT NULL",
-          "constraint_name": "2200_20932_1_not_null"
+          "table_name": "skill_registry",
+          "check_clause": "skill_type IS NOT NULL",
+          "constraint_name": "2200_34256_3_not_null"
         },
         {
           "table_name": "statement_items",
-          "check_clause": "canonical_name IS NOT NULL",
-          "constraint_name": "2200_20932_4_not_null"
+          "check_clause": "statement_id IS NOT NULL",
+          "constraint_name": "2200_20932_2_not_null"
         },
         {
           "table_name": "statement_items",
@@ -7866,13 +8042,18 @@
         },
         {
           "table_name": "statement_items",
+          "check_clause": "canonical_name IS NOT NULL",
+          "constraint_name": "2200_20932_4_not_null"
+        },
+        {
+          "table_name": "statement_items",
           "check_clause": "canonical_key IS NOT NULL",
           "constraint_name": "2200_20932_3_not_null"
         },
         {
           "table_name": "statement_items",
-          "check_clause": "statement_id IS NOT NULL",
-          "constraint_name": "2200_20932_2_not_null"
+          "check_clause": "id IS NOT NULL",
+          "constraint_name": "2200_20932_1_not_null"
         },
         {
           "table_name": "statements",
@@ -7896,8 +8077,8 @@
         },
         {
           "table_name": "work_hints",
-          "check_clause": "confidence IS NOT NULL",
-          "constraint_name": "2200_33547_7_not_null"
+          "check_clause": "doc_id IS NOT NULL",
+          "constraint_name": "2200_33547_2_not_null"
         },
         {
           "table_name": "work_hints",
@@ -7906,13 +8087,13 @@
         },
         {
           "table_name": "work_hints",
-          "check_clause": "doc_id IS NOT NULL",
-          "constraint_name": "2200_33547_2_not_null"
+          "check_clause": "hint_text IS NOT NULL",
+          "constraint_name": "2200_33547_4_not_null"
         },
         {
           "table_name": "work_hints",
-          "check_clause": "hint_text IS NOT NULL",
-          "constraint_name": "2200_33547_4_not_null"
+          "check_clause": "confidence IS NOT NULL",
+          "constraint_name": "2200_33547_7_not_null"
         },
         {
           "table_name": "work_hints",

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Input, Button, Space, Popconfirm, Select, Typography } from 'antd';
+import { Input, Button, Space, Popconfirm, Select, Typography, Segmented } from 'antd';
 import { SendOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ModelOption } from '../../lib/models';
+import type { RateSearchScope } from '../../types/customRates';
 
 interface Props {
   onSend: (text: string) => void | Promise<void>;
@@ -10,6 +11,8 @@ interface Props {
   models: ModelOption[];
   selectedModel: string;
   onModelChange: (model: string) => void;
+  scope: RateSearchScope;
+  onScopeChange: (s: RateSearchScope) => void;
 }
 
 export default function ChatInputBar({
@@ -19,6 +22,8 @@ export default function ChatInputBar({
   models,
   selectedModel,
   onModelChange,
+  scope,
+  onScopeChange,
 }: Props) {
   const [text, setText] = useState('');
 
@@ -75,18 +80,36 @@ export default function ChatInputBar({
             Сбросить чат
           </Button>
         </Popconfirm>
-        <Space size={6}>
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-            Модель:
-          </Typography.Text>
-          <Select
-            size="small"
-            value={selectedModel}
-            onChange={onModelChange}
-            disabled={disabled || models.length === 0}
-            style={{ minWidth: 220 }}
-            options={models.map((m) => ({ value: m.value, label: m.label, title: m.value }))}
-          />
+        <Space size={12} wrap>
+          <Space size={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              База:
+            </Typography.Text>
+            <Segmented
+              size="small"
+              value={scope}
+              onChange={(v) => onScopeChange(v as RateSearchScope)}
+              disabled={disabled}
+              options={[
+                { label: 'ФСНБ', value: 'fsnb' },
+                { label: '1С', value: 'imported' },
+                { label: 'Обе', value: 'both' },
+              ]}
+            />
+          </Space>
+          <Space size={6}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              Модель:
+            </Typography.Text>
+            <Select
+              size="small"
+              value={selectedModel}
+              onChange={onModelChange}
+              disabled={disabled || models.length === 0}
+              style={{ minWidth: 220 }}
+              options={models.map((m) => ({ value: m.value, label: m.label, title: m.value }))}
+            />
+          </Space>
         </Space>
       </div>
     </div>

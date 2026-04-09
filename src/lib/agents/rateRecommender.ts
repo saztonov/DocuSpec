@@ -23,7 +23,7 @@ import type {
   ChatHistoryMessage,
   ChatAgentConfig,
 } from './agentChatRunner.ts';
-import type { RateContextSnapshot } from '../../types/customRates.ts';
+import type { RateContextSnapshot, RateSearchScope } from '../../types/customRates.ts';
 import Fuse from 'fuse.js';
 
 // ── Fallback-промпт (используется, если в БД нет записи rate_recommender_system) ──
@@ -60,25 +60,100 @@ custom > imported (1С) > fsnb. Свои корпоративные расцен
 - НЕ повторяй одинаковые tool-вызовы.
 - После propose_rate_set диалог продолжается — пользователь может попросить корректировки.`;
 
+/**
+ * Вариант промпта для режима «Только ФСНБ». Корпоративные расценки 1С
+ * недоступны, tools по ним не вызываются.
+ */
+export const FALLBACK_RATE_RECOMMENDER_PROMPT_FSNB = `Ты — эксперт-сметчик строительного производства. Ведёшь диалог с пользователем, чтобы подобрать набор расценок для описанных им работ. Область поиска ОГРАНИЧЕНА государственными нормами ФСНБ (whitelist v2, is_selected=true). Корпоративные расценки 1С и custom в этом режиме недоступны.
+
+## Стартовый контекст
+В первом system-сообщении тебе передана карта ФСНБ:
+1. Дерево ФСНБ до уровня таблиц включительно (только нормы whitelist v2)
+2. Справочник категорий и видов затрат (нужен для поля suggested_category_id/suggested_type_id при оформлении результата)
+
+Используй дерево ФСНБ, чтобы не делать слепых поисков, если структура уже видна.
+
+## Алгоритм работы
+
+1. Прочитай описание работ. Если неоднозначно — задай 1–2 коротких уточняющих вопроса (не больше за раз). Не спрашивай очевидное.
+2. Сопоставь описание с ветками дерева ФСНБ из стартового контекста.
+3. Вызови tool list_fsnb_norms_in_table, чтобы получить нормы внутри конкретной таблицы.
+4. Для 2–3 норм-кандидатов вызови tool get_norm_details, чтобы посмотреть ресурсный состав.
+5. Используй tool search_fsnb_fallback ТОЛЬКО как запасной вариант, если по дереву не нашлось.
+6. Когда уверен в наборе — вызови terminal tool propose_rate_set. В поле source всех расценок используй ТОЛЬКО "fsnb".
+
+## Формат propose_rate_set (СТРОГО)
+Все поля обязательны. UUID берутся ТОЛЬКО из переданных данных. Источник строго "fsnb".
+
+## Важные правила
+- ВСЕГДА указывай suggested_category_id и suggested_type_id из стартового контекста.
+- НЕ предлагай расценки с source="imported" или "custom" — они вне области поиска.
+- НЕ повторяй одинаковые tool-вызовы.
+- После propose_rate_set диалог продолжается — пользователь может попросить корректировки.`;
+
+/**
+ * Вариант промпта для режима «Только 1С». ФСНБ недоступен, tools по нему
+ * не вызываются. Все корпоративные расценки переданы в стартовом контексте —
+ * выбирай напрямую, без tools поиска.
+ */
+export const FALLBACK_RATE_RECOMMENDER_PROMPT_IMPORTED = `Ты — эксперт-сметчик строительного производства. Ведёшь диалог с пользователем, чтобы подобрать набор расценок для описанных им работ. Область поиска ОГРАНИЧЕНА корпоративными расценками 1С (imported_rates). ФСНБ и custom в этом режиме недоступны.
+
+## Стартовый контекст
+В первом system-сообщении тебе передана полная карта корпоративных расценок 1С:
+1. Все категории и виды затрат
+2. Все imported_rates с полями id, name, unit, type_id, category_id
+
+Все данные уже в контексте — tools поиска не нужны. Выбирай расценки напрямую из переданного массива.
+
+## Алгоритм работы
+
+1. Прочитай описание работ. Если неоднозначно — задай 1–2 коротких уточняющих вопроса (не больше за раз).
+2. Просмотри категории/виды и сопоставь описание с именами расценок в imported_rates_1s.
+3. Отбери 3–7 наиболее релевантных.
+4. Вызови terminal tool propose_rate_set. В поле source всех расценок используй ТОЛЬКО "imported". source_id — это id из imported_rates_1s.
+
+## Формат propose_rate_set (СТРОГО)
+Все поля обязательны. UUID берутся ТОЛЬКО из переданных данных. Источник строго "imported". Поле code = null (у 1С нет кодов).
+
+## Важные правила
+- ВСЕГДА указывай suggested_category_id и suggested_type_id (бери их прямо из выбранной расценки).
+- НЕ предлагай расценки с source="fsnb" или "custom" — они вне области поиска.
+- Не вызывай tools поиска — данных в стартовом контексте достаточно.
+- После propose_rate_set диалог продолжается — пользователь может попросить корректировки.`;
+
+const PROMPT_KEY_BY_SCOPE: Record<RateSearchScope, string> = {
+  both: 'rate_recommender_system',
+  fsnb: 'rate_recommender_system_fsnb',
+  imported: 'rate_recommender_system_imported',
+};
+
+const FALLBACK_BY_SCOPE: Record<RateSearchScope, string> = {
+  both: FALLBACK_RATE_RECOMMENDER_PROMPT,
+  fsnb: FALLBACK_RATE_RECOMMENDER_PROMPT_FSNB,
+  imported: FALLBACK_RATE_RECOMMENDER_PROMPT_IMPORTED,
+};
+
 // ── Загрузка системного промпта ─────────────────────────────────
 
-export async function loadRateRecommenderPrompt(): Promise<string> {
+export async function loadRateRecommenderPrompt(scope: RateSearchScope = 'both'): Promise<string> {
+  const key = PROMPT_KEY_BY_SCOPE[scope];
+  const fallback = FALLBACK_BY_SCOPE[scope];
   try {
     const { data, error } = await supabase
       .from('llm_prompts')
       .select('system_prompt')
-      .eq('key', 'rate_recommender_system')
+      .eq('key', key)
       .eq('is_active', true)
       .maybeSingle();
 
     if (error) {
       console.warn('[rateRecommender] Не удалось загрузить промпт из БД:', error.message);
-      return FALLBACK_RATE_RECOMMENDER_PROMPT;
+      return fallback;
     }
-    return (data?.system_prompt as string | undefined) ?? FALLBACK_RATE_RECOMMENDER_PROMPT;
+    return (data?.system_prompt as string | undefined) ?? fallback;
   } catch (e) {
     console.warn('[rateRecommender] Ошибка загрузки промпта:', e);
-    return FALLBACK_RATE_RECOMMENDER_PROMPT;
+    return fallback;
   }
 }
 
@@ -94,8 +169,14 @@ export async function loadRateRecommenderPrompt(): Promise<string> {
  *  - все imported_rates (1С)
  *  - все custom_rates
  */
-export function buildStartContext(snapshot: RateContextSnapshot): string {
-  const tree = buildFsnbTreeForLlm(snapshot);
+export function buildStartContext(
+  snapshot: RateContextSnapshot,
+  scope: RateSearchScope = 'both',
+): string {
+  const includeFsnb = scope === 'fsnb' || scope === 'both';
+  const includeImported = scope === 'imported' || scope === 'both';
+
+  const tree = includeFsnb ? buildFsnbTreeForLlm(snapshot) : null;
 
   const categoriesPayload = snapshot.categories.map((c) => ({
     id: c.id,
@@ -108,34 +189,38 @@ export function buildStartContext(snapshot: RateContextSnapshot): string {
     name: t.name,
   }));
 
-  const importedPayload = snapshot.importedRates.map((r) => ({
-    id: r.id,
-    name: r.work_name,
-    unit: r.unit,
-    type_id: r.type_id,
-    category_id: r.category_id,
-  }));
+  const importedPayload = includeImported
+    ? snapshot.importedRates.map((r) => ({
+        id: r.id,
+        name: r.work_name,
+        unit: r.unit,
+        type_id: r.type_id,
+        category_id: r.category_id,
+      }))
+    : [];
 
-  const customPayload = snapshot.customRates.map((r) => ({
-    id: r.id,
-    name: r.work_name,
-    unit: r.unit,
-    type_id: r.type_id,
-    source_kind: r.source_kind,
-  }));
+  const customPayload = scope === 'both'
+    ? snapshot.customRates.map((r) => ({
+        id: r.id,
+        name: r.work_name,
+        unit: r.unit,
+        type_id: r.type_id,
+        source_kind: r.source_kind,
+      }))
+    : [];
 
-  const block = {
-    fsnb_tree: tree,
+  const block: Record<string, unknown> = {
     categories: categoriesPayload,
     types: typesPayload,
-    imported_rates_1s: importedPayload,
-    custom_rates: customPayload,
     stats: {
-      fsnb_norms_total: snapshot.fsnbNorms.length,
-      imported_total: snapshot.importedRates.length,
-      custom_total: snapshot.customRates.length,
+      fsnb_norms_total: includeFsnb ? snapshot.fsnbNorms.length : 0,
+      imported_total: includeImported ? snapshot.importedRates.length : 0,
+      custom_total: scope === 'both' ? snapshot.customRates.length : 0,
     },
   };
+  if (includeFsnb) block.fsnb_tree = tree;
+  if (includeImported) block.imported_rates_1s = importedPayload;
+  if (scope === 'both') block.custom_rates = customPayload;
 
   return (
     '\n\n## Стартовая карта территории (используй её для навигации)\n\n' +
@@ -147,7 +232,7 @@ export function buildStartContext(snapshot: RateContextSnapshot): string {
 
 // ── Tools агента ────────────────────────────────────────────────
 
-function buildTools(snapshot: RateContextSnapshot): AgentTool[] {
+function buildTools(snapshot: RateContextSnapshot, scope: RateSearchScope = 'both'): AgentTool[] {
   // Подготавливаем общий Fuse-индекс для search_fsnb_fallback
   const fuseFsnb = new Fuse(snapshot.fsnbNorms, {
     keys: [
@@ -308,6 +393,10 @@ function buildTools(snapshot: RateContextSnapshot): AgentTool[] {
     execute: async () => ({ ok: true, intercepted_by_ui: true }),
   };
 
+  // При scope='imported' ФСНБ-tools исключаются — всё в стартовом контексте.
+  if (scope === 'imported') {
+    return [proposeTool];
+  }
   return [listNormsTool, getDetailsTool, fallbackTool, proposeTool];
 }
 
@@ -317,17 +406,20 @@ function buildTools(snapshot: RateContextSnapshot): AgentTool[] {
  * Создаёт ChatAgentConfig для RateRecommender. Тоже асинхронная — нужно
  * подгрузить snapshot и системный промпт из БД.
  */
-export async function createRateRecommenderConfig(): Promise<{
+export async function createRateRecommenderConfig(
+  options: { scope?: RateSearchScope } = {},
+): Promise<{
   config: ChatAgentConfig;
   snapshot: RateContextSnapshot;
   systemPromptWithContext: string;
 }> {
+  const scope = options.scope ?? 'both';
   const snapshot = await getRateContextSnapshot();
-  const basePrompt = await loadRateRecommenderPrompt();
-  const startContext = buildStartContext(snapshot);
+  const basePrompt = await loadRateRecommenderPrompt(scope);
+  const startContext = buildStartContext(snapshot, scope);
   const systemPromptWithContext = basePrompt + startContext;
 
-  const tools = buildTools(snapshot);
+  const tools = buildTools(snapshot, scope);
 
   const config: ChatAgentConfig = {
     name: 'rate_recommender',

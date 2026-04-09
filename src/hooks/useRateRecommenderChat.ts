@@ -25,6 +25,7 @@ import type {
   ChatMessage,
   Candidate,
   ProposeRateSetPayload,
+  RateSearchScope,
 } from '../types/customRates';
 
 let messageIdCounter = 0;
@@ -47,7 +48,10 @@ interface UseRateRecommenderChatResult {
  * @param model — id модели OpenRouter, перекрывающий env-дефолт. Если undefined,
  *                будет использован VITE_OPENROUTER_MODEL.
  */
-export function useRateRecommenderChat(model?: string): UseRateRecommenderChatResult {
+export function useRateRecommenderChat(
+  model?: string,
+  scope: RateSearchScope = 'both',
+): UseRateRecommenderChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,13 +61,17 @@ export function useRateRecommenderChat(model?: string): UseRateRecommenderChatRe
   const configRef = useRef<ChatAgentConfig | null>(null);
   const historyRef = useRef<ChatHistoryMessage[]>([]);
 
-  // Инициализация: подгружаем snapshot и промпт
+  // Инициализация: подгружаем snapshot и промпт.
+  // Пересоздаётся при смене scope — другой system-промпт и другие tools.
   useEffect(() => {
     let cancelled = false;
     setInitializing(true);
     setError(null);
+    // Сбрасываем историю UI при смене scope — продолжать старый диалог с новым
+    // системным промптом бессмысленно.
+    setMessages([]);
 
-    createRateRecommenderConfig()
+    createRateRecommenderConfig({ scope })
       .then(({ config, systemPromptWithContext }) => {
         if (cancelled) return;
         configRef.current = config;
@@ -81,7 +89,7 @@ export function useRateRecommenderChat(model?: string): UseRateRecommenderChatRe
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scope]);
 
   const sendMessage = useCallback(
     async (text: string) => {

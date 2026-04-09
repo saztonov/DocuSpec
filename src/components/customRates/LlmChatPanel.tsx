@@ -4,7 +4,21 @@ import ChatMessageList from './ChatMessageList';
 import ChatInputBar from './ChatInputBar';
 import { useRateRecommenderChat } from '../../hooks/useRateRecommenderChat';
 import { getAvailableModels } from '../../lib/models';
-import type { Candidate } from '../../types/customRates';
+import {
+  LLM_CHAT_SCOPE_LS_KEY,
+  type Candidate,
+  type RateSearchScope,
+} from '../../types/customRates';
+
+function loadChatScope(): RateSearchScope {
+  try {
+    const v = localStorage.getItem(LLM_CHAT_SCOPE_LS_KEY);
+    if (v === 'fsnb' || v === 'imported' || v === 'both') return v;
+  } catch {
+    /* ignore */
+  }
+  return 'both';
+}
 
 interface Props {
   inDraftKeys: Set<string>;
@@ -32,7 +46,18 @@ export default function LlmChatPanel({ inDraftKeys, existingKeys, onAddToDraft }
     }
   };
 
-  const chat = useRateRecommenderChat(selectedModel || undefined);
+  const [scope, setScope] = useState<RateSearchScope>(() => loadChatScope());
+
+  const handleScopeChange = (next: RateSearchScope) => {
+    setScope(next);
+    try {
+      localStorage.setItem(LLM_CHAT_SCOPE_LS_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const chat = useRateRecommenderChat(selectedModel || undefined, scope);
   const listRef = useRef<HTMLDivElement>(null);
 
   // Автоскролл вниз при новых сообщениях
@@ -106,6 +131,8 @@ export default function LlmChatPanel({ inDraftKeys, existingKeys, onAddToDraft }
             models={models}
             selectedModel={selectedModel}
             onModelChange={handleModelChange}
+            scope={scope}
+            onScopeChange={handleScopeChange}
           />
         </>
       )}

@@ -1,7 +1,7 @@
-import { Input, Slider, Typography, Button, Space } from 'antd';
+import { Input, Slider, Typography, Button, Space, Segmented } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import FuzzySettingsPopover from './FuzzySettingsPopover';
-import type { FuzzySettings } from '../../types/customRates';
+import type { FuzzySettings, RateSearchScope } from '../../types/customRates';
 
 interface Props {
   query: string;
@@ -10,6 +10,8 @@ interface Props {
   onSettingsChange: (next: FuzzySettings) => void;
   onSearch: () => void;
   loading: boolean;
+  scope: RateSearchScope;
+  onScopeChange: (s: RateSearchScope) => void;
 }
 
 export default function QuickSearchControls({
@@ -19,6 +21,8 @@ export default function QuickSearchControls({
   onSettingsChange,
   onSearch,
   loading,
+  scope,
+  onScopeChange,
 }: Props) {
   return (
     <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0', background: '#fff' }}>
@@ -42,8 +46,22 @@ export default function QuickSearchControls({
           display: 'flex',
           alignItems: 'center',
           gap: 12,
+          flexWrap: 'wrap',
         }}
       >
+        <Typography.Text type="secondary" style={{ minWidth: 80 }}>
+          База:
+        </Typography.Text>
+        <Segmented
+          size="small"
+          value={scope}
+          onChange={(v) => onScopeChange(v as RateSearchScope)}
+          options={[
+            { label: 'ФСНБ', value: 'fsnb' },
+            { label: '1С', value: 'imported' },
+            { label: 'Обе', value: 'both' },
+          ]}
+        />
         <Typography.Text type="secondary" style={{ minWidth: 130 }}>
           Чувствительность:
         </Typography.Text>

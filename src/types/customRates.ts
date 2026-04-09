@@ -10,6 +10,22 @@
 
 export type RateSourceKind = 'fsnb' | 'imported' | 'custom';
 
+/**
+ * Область поиска расценок на вкладке «Новые расценки».
+ * Влияет и на быстрый (Fuse.js), и на умный (LLM) поиск.
+ * custom_rates сюда не включены — это целевой справочник, а не база поиска.
+ */
+export type RateSearchScope = 'fsnb' | 'imported' | 'both';
+
+export const RATE_SEARCH_SCOPE_LABEL: Record<RateSearchScope, string> = {
+  fsnb: 'ФСНБ',
+  imported: '1С',
+  both: 'Обе',
+};
+
+export const QUICK_SEARCH_SCOPE_LS_KEY = 'docuspec.customRates.quickSearchScope';
+export const LLM_CHAT_SCOPE_LS_KEY = 'docuspec.customRates.llmChatScope';
+
 /** Человеко-читаемый ярлык источника для UI-тегов */
 export const RATE_SOURCE_LABEL: Record<RateSourceKind, string> = {
   fsnb: 'ФСНБ',
