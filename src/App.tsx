@@ -3,6 +3,7 @@ import { ConfigProvider, Layout, App as AntApp } from 'antd';
 import ruRU from 'antd/locale/ru_RU';
 import AdminPage from './pages/AdminPage.tsx';
 import PricesPage from './pages/PricesPage.tsx';
+import ReferencesPage from './pages/ReferencesPage.tsx';
 import LoginPage from './pages/LoginPage.tsx';
 import { AuthProvider } from './hooks/useAuth.tsx';
 import RequireAuth from './components/auth/RequireAuth.tsx';
@@ -20,6 +21,14 @@ function AppLayout() {
             element={
               <RequireAuth>
                 <PricesPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/references"
+            element={
+              <RequireAuth>
+                <ReferencesPage />
               </RequireAuth>
             }
           />

@@ -21,6 +21,8 @@ export interface RateType {
   name: string;
 }
 
+export type RateKind = 'base' | 'optional';
+
 export interface RateRow {
   id: string;
   type_id: string;
@@ -28,9 +30,22 @@ export interface RateRow {
   unit: string | null;
   price_contract: number | null;
   price_own: number | null;
+  rate_type: RateKind;
   type_name: string;
   category_id: string;
   category_name: string;
+}
+
+export interface RateMaterialRow {
+  id: string;
+  rate_id: string;
+  material_id: string;
+  material_name: string;
+  material_unit: string | null;
+  material_price: number | null;
+  quantity: number;
+  rate_type: RateKind;
+  created_at: string;
 }
 
 type HeaderKey = 'category' | 'type' | 'workName' | 'unit' | 'priceContract' | 'priceOwn';
@@ -248,7 +263,7 @@ export async function loadRates(params: {
   let q = supabase
     .from('imported_rates')
     .select(
-      'id, type_id, work_name, unit, price_contract, price_own, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
+      'id, type_id, work_name, unit, price_contract, price_own, rate_type, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
       { count: 'exact' },
     );
 
@@ -273,6 +288,7 @@ export async function loadRates(params: {
     unit: r.unit,
     price_contract: r.price_contract !== null ? Number(r.price_contract) : null,
     price_own: r.price_own !== null ? Number(r.price_own) : null,
+    rate_type: (r.rate_type ?? 'base') as RateKind,
     type_name: r.imported_rate_types?.name ?? '',
     category_id: r.imported_rate_types?.category_id ?? '',
     category_name: r.imported_rate_types?.imported_rate_categories?.name ?? '',
@@ -326,7 +342,7 @@ export async function loadRatesByType(typeId: string): Promise<RateRow[]> {
   const { data, error } = await supabase
     .from('imported_rates')
     .select(
-      'id, type_id, work_name, unit, price_contract, price_own, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
+      'id, type_id, work_name, unit, price_contract, price_own, rate_type, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
     )
     .eq('type_id', typeId)
     .order('work_name');
@@ -338,6 +354,7 @@ export async function loadRatesByType(typeId: string): Promise<RateRow[]> {
     unit: r.unit,
     price_contract: r.price_contract !== null ? Number(r.price_contract) : null,
     price_own: r.price_own !== null ? Number(r.price_own) : null,
+    rate_type: (r.rate_type ?? 'base') as RateKind,
     type_name: r.imported_rate_types?.name ?? '',
     category_id: r.imported_rate_types?.category_id ?? '',
     category_name: r.imported_rate_types?.imported_rate_categories?.name ?? '',
@@ -350,6 +367,7 @@ export interface ImportedRateInput {
   unit: string | null;
   price_contract: number | null;
   price_own: number | null;
+  rate_type?: RateKind;
 }
 
 export async function createImportedRate(input: ImportedRateInput): Promise<RateRow> {
@@ -361,9 +379,10 @@ export async function createImportedRate(input: ImportedRateInput): Promise<Rate
       unit: input.unit,
       price_contract: input.price_contract,
       price_own: input.price_own,
+      rate_type: input.rate_type ?? 'base',
     })
     .select(
-      'id, type_id, work_name, unit, price_contract, price_own, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
+      'id, type_id, work_name, unit, price_contract, price_own, rate_type, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
     )
     .single();
 
@@ -381,13 +400,111 @@ export async function createImportedRate(input: ImportedRateInput): Promise<Rate
     unit: r.unit,
     price_contract: r.price_contract !== null ? Number(r.price_contract) : null,
     price_own: r.price_own !== null ? Number(r.price_own) : null,
+    rate_type: (r.rate_type ?? 'base') as RateKind,
     type_name: r.imported_rate_types?.name ?? '',
     category_id: r.imported_rate_types?.category_id ?? '',
     category_name: r.imported_rate_types?.imported_rate_categories?.name ?? '',
   };
 }
 
-export type ImportedRatePatch = Partial<Pick<ImportedRateInput, 'work_name' | 'unit' | 'price_contract' | 'price_own'>>;
+export async function deleteImportedRate(id: string): Promise<void> {
+  const { error } = await supabase.from('imported_rates').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function createCategory(name: string): Promise<RateCategory> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Название категории обязательно');
+  const { data, error } = await supabase
+    .from('imported_rate_categories')
+    .insert({ name: trimmed })
+    .select('id, name')
+    .single();
+  if (error) {
+    if ((error as any).code === '23505') {
+      throw new Error(`Категория «${trimmed}» уже существует`);
+    }
+    throw error;
+  }
+  return data as RateCategory;
+}
+
+export async function updateCategoryName(id: string, name: string): Promise<RateCategory> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Название категории обязательно');
+  const { data, error } = await supabase
+    .from('imported_rate_categories')
+    .update({ name: trimmed })
+    .eq('id', id)
+    .select('id, name')
+    .single();
+  if (error) {
+    if ((error as any).code === '23505') {
+      throw new Error(`Категория «${trimmed}» уже существует`);
+    }
+    throw error;
+  }
+  return data as RateCategory;
+}
+
+export async function deleteCategory(id: string): Promise<void> {
+  const { error } = await supabase.from('imported_rate_categories').delete().eq('id', id);
+  if (error) {
+    if ((error as any).code === '23503') {
+      throw new Error('Нельзя удалить категорию: в ней есть виды затрат');
+    }
+    throw error;
+  }
+}
+
+export async function createType(categoryId: string, name: string): Promise<RateType> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Название вида затрат обязательно');
+  const { data, error } = await supabase
+    .from('imported_rate_types')
+    .insert({ category_id: categoryId, name: trimmed })
+    .select('id, category_id, name')
+    .single();
+  if (error) {
+    if ((error as any).code === '23505') {
+      throw new Error(`Вид «${trimmed}» уже существует в этой категории`);
+    }
+    throw error;
+  }
+  return data as RateType;
+}
+
+export async function updateTypeName(id: string, name: string): Promise<RateType> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Название вида затрат обязательно');
+  const { data, error } = await supabase
+    .from('imported_rate_types')
+    .update({ name: trimmed })
+    .eq('id', id)
+    .select('id, category_id, name')
+    .single();
+  if (error) {
+    if ((error as any).code === '23505') {
+      throw new Error(`Вид «${trimmed}» уже существует в этой категории`);
+    }
+    throw error;
+  }
+  return data as RateType;
+}
+
+export async function deleteType(id: string): Promise<void> {
+  const { error } = await supabase.from('imported_rate_types').delete().eq('id', id);
+  if (error) {
+    if ((error as any).code === '23503') {
+      throw new Error('Нельзя удалить вид: в нём есть расценки');
+    }
+    throw error;
+  }
+}
+
+export type ImportedRatePatch = Partial<
+  Pick<ImportedRateInput, 'work_name' | 'unit' | 'price_contract' | 'price_own' | 'rate_type'>
+>;
 
 export async function updateImportedRate(id: string, patch: ImportedRatePatch): Promise<RateRow> {
   const { data, error } = await supabase
@@ -395,7 +512,7 @@ export async function updateImportedRate(id: string, patch: ImportedRatePatch): 
     .update(patch)
     .eq('id', id)
     .select(
-      'id, type_id, work_name, unit, price_contract, price_own, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
+      'id, type_id, work_name, unit, price_contract, price_own, rate_type, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
     )
     .single();
 
@@ -413,8 +530,91 @@ export async function updateImportedRate(id: string, patch: ImportedRatePatch): 
     unit: r.unit,
     price_contract: r.price_contract !== null ? Number(r.price_contract) : null,
     price_own: r.price_own !== null ? Number(r.price_own) : null,
+    rate_type: (r.rate_type ?? 'base') as RateKind,
     type_name: r.imported_rate_types?.name ?? '',
     category_id: r.imported_rate_types?.category_id ?? '',
     category_name: r.imported_rate_types?.imported_rate_categories?.name ?? '',
   };
+}
+
+// ── Материалы, привязанные к расценке ─────────────────────────────────────
+
+const RATE_MATERIAL_SELECT =
+  'id, rate_id, material_id, quantity, rate_type, created_at, materials!inner(id, name, unit, price)';
+
+function mapRateMaterial(r: any): RateMaterialRow {
+  const m = r.materials ?? {};
+  return {
+    id: r.id,
+    rate_id: r.rate_id,
+    material_id: r.material_id,
+    material_name: m.name ?? '',
+    material_unit: m.unit ?? null,
+    material_price:
+      m.price !== null && m.price !== undefined ? Number(m.price) : null,
+    quantity: r.quantity !== null && r.quantity !== undefined ? Number(r.quantity) : 0,
+    rate_type: (r.rate_type ?? 'base') as RateKind,
+    created_at: r.created_at,
+  };
+}
+
+export async function loadRateMaterials(rateId: string): Promise<RateMaterialRow[]> {
+  const { data, error } = await supabase
+    .from('imported_rate_materials')
+    .select(RATE_MATERIAL_SELECT)
+    .eq('rate_id', rateId)
+    .order('created_at');
+  if (error) throw error;
+  return (data ?? []).map(mapRateMaterial);
+}
+
+export interface RateMaterialInput {
+  rate_id: string;
+  material_id: string;
+  quantity: number;
+  rate_type: RateKind;
+}
+
+export async function addRateMaterial(input: RateMaterialInput): Promise<RateMaterialRow> {
+  const { data, error } = await supabase
+    .from('imported_rate_materials')
+    .insert({
+      rate_id: input.rate_id,
+      material_id: input.material_id,
+      quantity: input.quantity,
+      rate_type: input.rate_type,
+    })
+    .select(RATE_MATERIAL_SELECT)
+    .single();
+  if (error) {
+    if ((error as any).code === '23505') {
+      throw new Error('Этот материал уже привязан к расценке');
+    }
+    throw error;
+  }
+  return mapRateMaterial(data);
+}
+
+export type RateMaterialPatch = Partial<Pick<RateMaterialInput, 'quantity' | 'rate_type'>>;
+
+export async function updateRateMaterial(
+  id: string,
+  patch: RateMaterialPatch,
+): Promise<RateMaterialRow> {
+  const { data, error } = await supabase
+    .from('imported_rate_materials')
+    .update(patch)
+    .eq('id', id)
+    .select(RATE_MATERIAL_SELECT)
+    .single();
+  if (error) throw error;
+  return mapRateMaterial(data);
+}
+
+export async function removeRateMaterial(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('imported_rate_materials')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
 }

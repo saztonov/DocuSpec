@@ -8,6 +8,7 @@ import {
   KeyOutlined,
   SettingOutlined,
   FileTextOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
@@ -61,11 +62,13 @@ export default function AppHeader() {
 
   const selectedKey = useMemo(() => {
     if (location.pathname.startsWith('/admin')) return '/admin';
+    if (location.pathname.startsWith('/references')) return '/references';
     return '/';
   }, [location.pathname]);
 
   const navItems: MenuProps['items'] = [
     { key: '/', label: 'Расценки', icon: <FileTextOutlined /> },
+    { key: '/references', label: 'Справочники', icon: <DatabaseOutlined /> },
     ...(isAdmin
       ? [{ key: '/admin', label: 'Администрирование', icon: <SettingOutlined /> }]
       : []),

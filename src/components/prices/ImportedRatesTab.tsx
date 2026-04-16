@@ -5,6 +5,7 @@ import {
   Card,
   Input,
   InputNumber,
+  Popconfirm,
   Select,
   Space,
   Spin,
@@ -21,12 +22,18 @@ import {
   EditOutlined,
   CheckOutlined,
   CloseOutlined,
+  DeleteOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
+  createCategory,
   createImportedRate,
+  createType,
+  deleteCategory,
+  deleteImportedRate,
+  deleteType,
   importRates,
   loadCategories,
   loadCategoriesWithCounts,
@@ -35,14 +42,19 @@ import {
   loadTypes,
   loadTypesWithCounts,
   parseRatesXlsx,
+  updateCategoryName,
   updateImportedRate,
+  updateTypeName,
   type ParsedRate,
   type RateCategory,
   type RateCategoryNode,
+  type RateKind,
   type RateRow,
   type RateType,
   type RateTypeNode,
 } from '../../lib/importedRates';
+import { useMaterialsCatalog } from '../../hooks/useMaterialsCatalog';
+import RateMaterialsPanel from './RateMaterialsPanel';
 
 type CategoryRow = {
   rowKind: 'category';
@@ -50,6 +62,7 @@ type CategoryRow = {
   id: string;
   name: string;
   types_count: number;
+  isDraft?: boolean;
 };
 
 type TypeRow = {
@@ -59,6 +72,7 @@ type TypeRow = {
   category_id: string;
   name: string;
   rates_count: number;
+  isDraft?: boolean;
 };
 
 type RateLeafRow = {
@@ -70,6 +84,7 @@ type RateLeafRow = {
   unit: string | null;
   price_contract: number | null;
   price_own: number | null;
+  rate_type: RateKind;
   isDraft?: boolean;
 };
 
@@ -78,6 +93,7 @@ type EditBuffer = {
   unit: string | null;
   price_contract: number | null;
   price_own: number | null;
+  rate_type: RateKind;
 };
 
 const priceFmt = new Intl.NumberFormat('ru-RU', {
@@ -121,12 +137,27 @@ export default function ImportedRatesTab() {
   const [flatRows, setFlatRows] = useState<RateRow[]>([]);
   const [flatLoading, setFlatLoading] = useState(false);
 
-  // Редактирование
+  // Редактирование расценок
   const [editingRateId, setEditingRateId] = useState<string | null>(null);
   const [editBuffer, setEditBuffer] = useState<EditBuffer | null>(null);
   const [savingRateId, setSavingRateId] = useState<string | null>(null);
+  const [deletingRateId, setDeletingRateId] = useState<string | null>(null);
+
+  // Редактирование категорий
+  const [draftCategories, setDraftCategories] = useState<CategoryRow[]>([]);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState<string>('');
+  const [savingCategoryId, setSavingCategoryId] = useState<string | null>(null);
+
+  // Редактирование видов
+  const [draftTypesByCategory, setDraftTypesByCategory] = useState<Record<string, TypeRow[]>>({});
+  const [editingTypeId, setEditingTypeId] = useState<string | null>(null);
+  const [editingTypeName, setEditingTypeName] = useState<string>('');
+  const [savingTypeId, setSavingTypeId] = useState<string | null>(null);
 
   const flatMode = appliedSearch.trim().length > 0;
+
+  const materialsCatalog = useMaterialsCatalog();
 
   const refreshCategories = useCallback(async () => {
     try {
@@ -268,6 +299,7 @@ export default function ImportedRatesTab() {
           unit: r.unit,
           price_contract: r.price_contract,
           price_own: r.price_own,
+          rate_type: r.rate_type,
         }));
         setRatesByType((m) => ({ ...m, [tId]: leafRows }));
       } catch (e: any) {
@@ -290,6 +322,7 @@ export default function ImportedRatesTab() {
       unit: row.unit,
       price_contract: row.price_contract,
       price_own: row.price_own,
+      rate_type: row.rate_type,
     });
   };
 
@@ -323,6 +356,7 @@ export default function ImportedRatesTab() {
           unit,
           price_contract: editBuffer.price_contract,
           price_own: editBuffer.price_own,
+          rate_type: editBuffer.rate_type,
         });
         setRatesByType((m) => {
           const list = m[row.type_id];
@@ -338,6 +372,7 @@ export default function ImportedRatesTab() {
                   unit: created.unit,
                   price_contract: created.price_contract,
                   price_own: created.price_own,
+                  rate_type: created.rate_type,
                 } as RateLeafRow)
               : r,
           );
@@ -359,6 +394,7 @@ export default function ImportedRatesTab() {
           unit,
           price_contract: editBuffer.price_contract,
           price_own: editBuffer.price_own,
+          rate_type: editBuffer.rate_type,
         });
         setRatesByType((m) => {
           const list = m[row.type_id];
@@ -371,6 +407,7 @@ export default function ImportedRatesTab() {
                   unit: updated.unit,
                   price_contract: updated.price_contract,
                   price_own: updated.price_own,
+                  rate_type: updated.rate_type,
                 }
               : r,
           );
@@ -398,6 +435,7 @@ export default function ImportedRatesTab() {
       unit: null,
       price_contract: null,
       price_own: null,
+      rate_type: 'base',
       isDraft: true,
     };
     setRatesByType((m) => {
@@ -410,7 +448,268 @@ export default function ImportedRatesTab() {
       unit: null,
       price_contract: null,
       price_own: null,
+      rate_type: 'base',
     });
+  };
+
+  const handleDeleteRate = async (row: RateLeafRow) => {
+    setDeletingRateId(row.id);
+    try {
+      await deleteImportedRate(row.id);
+      setRatesByType((m) => {
+        const list = m[row.type_id];
+        if (!list) return m;
+        return { ...m, [row.type_id]: list.filter((r) => r.id !== row.id) };
+      });
+      setTypesByCategory((m) => {
+        const next: Record<string, RateTypeNode[]> = {};
+        for (const [catId, list] of Object.entries(m)) {
+          next[catId] = list.map((t) =>
+            t.id === row.type_id
+              ? { ...t, rates_count: Math.max(0, t.rates_count - 1) }
+              : t,
+          );
+        }
+        return next;
+      });
+      msg.success('Расценка удалена');
+    } catch (e: any) {
+      msg.error(e?.message ?? String(e));
+    } finally {
+      setDeletingRateId(null);
+    }
+  };
+
+  // ── Категории: CRUD ──────────────────────────────────────────────────────
+  const startEditCategory = (row: CategoryRow) => {
+    setEditingCategoryId(row.id);
+    setEditingCategoryName(row.name);
+  };
+
+  const cancelEditCategory = (row: CategoryRow) => {
+    if (row.isDraft) {
+      setDraftCategories((d) => d.filter((r) => r.id !== row.id));
+    }
+    setEditingCategoryId(null);
+    setEditingCategoryName('');
+  };
+
+  const saveEditCategory = async (row: CategoryRow) => {
+    const name = editingCategoryName.trim();
+    if (!name) {
+      msg.error('Название категории обязательно');
+      return;
+    }
+    setSavingCategoryId(row.id);
+    try {
+      if (row.isDraft) {
+        const created = await createCategory(name);
+        setDraftCategories((d) => d.filter((r) => r.id !== row.id));
+        setTreeCategories((list) => {
+          const next = [...list, { id: created.id, name: created.name, types_count: 0 }];
+          next.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+          return next;
+        });
+        setCategories((list) => {
+          const next = [...list, { id: created.id, name: created.name }];
+          next.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+          return next;
+        });
+        msg.success('Категория добавлена');
+      } else {
+        const updated = await updateCategoryName(row.id, name);
+        setTreeCategories((list) =>
+          list
+            .map((c) => (c.id === row.id ? { ...c, name: updated.name } : c))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+        );
+        setCategories((list) =>
+          list
+            .map((c) => (c.id === row.id ? { ...c, name: updated.name } : c))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+        );
+        msg.success('Категория переименована');
+      }
+      setEditingCategoryId(null);
+      setEditingCategoryName('');
+    } catch (e: any) {
+      msg.error(e?.message ?? String(e));
+    } finally {
+      setSavingCategoryId(null);
+    }
+  };
+
+  const handleDeleteCategory = async (row: CategoryRow) => {
+    setSavingCategoryId(row.id);
+    try {
+      await deleteCategory(row.id);
+      setTreeCategories((list) => list.filter((c) => c.id !== row.id));
+      setCategories((list) => list.filter((c) => c.id !== row.id));
+      setTypesByCategory((m) => {
+        const next = { ...m };
+        delete next[row.id];
+        return next;
+      });
+      if (categoryId === row.id) {
+        setCategoryId(null);
+        setTypeId(null);
+        await refreshTypes(null);
+      }
+      msg.success('Категория удалена');
+    } catch (e: any) {
+      msg.error(e?.message ?? String(e));
+    } finally {
+      setSavingCategoryId(null);
+    }
+  };
+
+  const addDraftCategory = () => {
+    const draftId = genDraftId();
+    const draftRow: CategoryRow = {
+      rowKind: 'category',
+      key: `cat-${draftId}`,
+      id: draftId,
+      name: '',
+      types_count: 0,
+      isDraft: true,
+    };
+    setDraftCategories((d) => [...d, draftRow]);
+    setEditingCategoryId(draftId);
+    setEditingCategoryName('');
+  };
+
+  // ── Виды затрат: CRUD ────────────────────────────────────────────────────
+  const startEditType = (row: TypeRow) => {
+    setEditingTypeId(row.id);
+    setEditingTypeName(row.name);
+  };
+
+  const cancelEditType = (row: TypeRow) => {
+    if (row.isDraft) {
+      setDraftTypesByCategory((m) => {
+        const list = m[row.category_id];
+        if (!list) return m;
+        return { ...m, [row.category_id]: list.filter((r) => r.id !== row.id) };
+      });
+    }
+    setEditingTypeId(null);
+    setEditingTypeName('');
+  };
+
+  const saveEditType = async (row: TypeRow) => {
+    const name = editingTypeName.trim();
+    if (!name) {
+      msg.error('Название вида затрат обязательно');
+      return;
+    }
+    setSavingTypeId(row.id);
+    try {
+      if (row.isDraft) {
+        const created = await createType(row.category_id, name);
+        setDraftTypesByCategory((m) => {
+          const list = m[row.category_id];
+          if (!list) return m;
+          return { ...m, [row.category_id]: list.filter((r) => r.id !== row.id) };
+        });
+        setTypesByCategory((m) => {
+          const list = m[row.category_id] ?? [];
+          const next = [
+            ...list,
+            {
+              id: created.id,
+              category_id: created.category_id,
+              name: created.name,
+              rates_count: 0,
+            },
+          ];
+          next.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+          return { ...m, [row.category_id]: next };
+        });
+        setTreeCategories((list) =>
+          list.map((c) =>
+            c.id === row.category_id ? { ...c, types_count: c.types_count + 1 } : c,
+          ),
+        );
+        if (categoryId === row.category_id) {
+          await refreshTypes(categoryId);
+        }
+        msg.success('Вид затрат добавлен');
+      } else {
+        const updated = await updateTypeName(row.id, name);
+        setTypesByCategory((m) => {
+          const list = m[row.category_id];
+          if (!list) return m;
+          const next = list
+            .map((t) => (t.id === row.id ? { ...t, name: updated.name } : t))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+          return { ...m, [row.category_id]: next };
+        });
+        if (categoryId === row.category_id) {
+          await refreshTypes(categoryId);
+        }
+        msg.success('Вид затрат переименован');
+      }
+      setEditingTypeId(null);
+      setEditingTypeName('');
+    } catch (e: any) {
+      msg.error(e?.message ?? String(e));
+    } finally {
+      setSavingTypeId(null);
+    }
+  };
+
+  const handleDeleteType = async (row: TypeRow) => {
+    setSavingTypeId(row.id);
+    try {
+      await deleteType(row.id);
+      setTypesByCategory((m) => {
+        const list = m[row.category_id];
+        if (!list) return m;
+        return { ...m, [row.category_id]: list.filter((t) => t.id !== row.id) };
+      });
+      setRatesByType((m) => {
+        const next = { ...m };
+        delete next[row.id];
+        return next;
+      });
+      setTreeCategories((list) =>
+        list.map((c) =>
+          c.id === row.category_id
+            ? { ...c, types_count: Math.max(0, c.types_count - 1) }
+            : c,
+        ),
+      );
+      if (typeId === row.id) {
+        setTypeId(null);
+      }
+      if (categoryId === row.category_id) {
+        await refreshTypes(categoryId);
+      }
+      msg.success('Вид затрат удалён');
+    } catch (e: any) {
+      msg.error(e?.message ?? String(e));
+    } finally {
+      setSavingTypeId(null);
+    }
+  };
+
+  const addDraftType = (catId: string) => {
+    const draftId = genDraftId();
+    const draftRow: TypeRow = {
+      rowKind: 'type',
+      key: `type-${draftId}`,
+      id: draftId,
+      category_id: catId,
+      name: '',
+      rates_count: 0,
+      isDraft: true,
+    };
+    setDraftTypesByCategory((m) => {
+      const list = m[catId] ?? [];
+      return { ...m, [catId]: [...list, draftRow] };
+    });
+    setEditingTypeId(draftId);
+    setEditingTypeName('');
   };
 
   // Дерево, отфильтрованное селектами
@@ -419,24 +718,46 @@ export default function ImportedRatesTab() {
     return treeCategories.filter((c) => c.id === categoryId);
   }, [treeCategories, categoryId]);
 
-  const treeData: CategoryRow[] = useMemo(
-    () =>
-      visibleCategories.map((c) => ({
-        rowKind: 'category',
-        key: `cat-${c.id}`,
-        id: c.id,
-        name: c.name,
-        types_count: c.types_count,
-      })),
-    [visibleCategories],
-  );
+  const treeData: CategoryRow[] = useMemo(() => {
+    const rows: CategoryRow[] = visibleCategories.map((c) => ({
+      rowKind: 'category',
+      key: `cat-${c.id}`,
+      id: c.id,
+      name: c.name,
+      types_count: c.types_count,
+    }));
+    if (!categoryId) {
+      rows.push(...draftCategories);
+    }
+    return rows;
+  }, [visibleCategories, draftCategories, categoryId]);
 
   const categoryColumns: ColumnsType<CategoryRow> = useMemo(
     () => [
       {
         title: 'Категория затрат',
         dataIndex: 'name',
-        render: (name: string) => <Typography.Text strong>{name}</Typography.Text>,
+        render: (_: unknown, row) => {
+          if (editingCategoryId === row.id) {
+            return (
+              <Input
+                value={editingCategoryName}
+                onChange={(e) => setEditingCategoryName(e.target.value)}
+                placeholder="Название категории"
+                onPressEnter={() => saveEditCategory(row)}
+                autoFocus
+              />
+            );
+          }
+          return (
+            <Space size={8} wrap>
+              <Typography.Text strong>
+                {row.name || <Typography.Text type="secondary">— без названия —</Typography.Text>}
+              </Typography.Text>
+              {row.isDraft && <Tag color="gold">Новая</Tag>}
+            </Space>
+          );
+        },
       },
       {
         title: 'Видов',
@@ -445,8 +766,62 @@ export default function ImportedRatesTab() {
         align: 'right',
         render: (n: number) => <Badge count={n} color="blue" showZero overflowCount={9999} />,
       },
+      {
+        title: '',
+        key: 'actions',
+        width: 130,
+        render: (_: unknown, row) => {
+          const isEditing = editingCategoryId === row.id;
+          const isSaving = savingCategoryId === row.id;
+          if (isEditing) {
+            return (
+              <Space size={4} onClick={(e) => e.stopPropagation()}>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<CheckOutlined />}
+                  loading={isSaving}
+                  onClick={() => saveEditCategory(row)}
+                />
+                <Button
+                  size="small"
+                  icon={<CloseOutlined />}
+                  disabled={isSaving}
+                  onClick={() => cancelEditCategory(row)}
+                />
+              </Space>
+            );
+          }
+          return (
+            <Space size={4} onClick={(e) => e.stopPropagation()}>
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                disabled={editingCategoryId !== null}
+                onClick={() => startEditCategory(row)}
+              />
+              <Popconfirm
+                title="Удалить категорию?"
+                description="Удалятся только пустые категории (без видов затрат)."
+                okText="Да"
+                cancelText="Нет"
+                onConfirm={() => handleDeleteCategory(row)}
+              >
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  loading={isSaving}
+                  disabled={editingCategoryId !== null}
+                />
+              </Popconfirm>
+            </Space>
+          );
+        },
+      },
     ],
-    [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editingCategoryId, editingCategoryName, savingCategoryId],
   );
 
   const typeColumns: ColumnsType<TypeRow> = useMemo(
@@ -454,7 +829,27 @@ export default function ImportedRatesTab() {
       {
         title: 'Вид затрат',
         dataIndex: 'name',
-        render: (name: string) => <Typography.Text>{name}</Typography.Text>,
+        render: (_: unknown, row) => {
+          if (editingTypeId === row.id) {
+            return (
+              <Input
+                value={editingTypeName}
+                onChange={(e) => setEditingTypeName(e.target.value)}
+                placeholder="Название вида затрат"
+                onPressEnter={() => saveEditType(row)}
+                autoFocus
+              />
+            );
+          }
+          return (
+            <Space size={8} wrap>
+              <Typography.Text>
+                {row.name || <Typography.Text type="secondary">— без названия —</Typography.Text>}
+              </Typography.Text>
+              {row.isDraft && <Tag color="gold">Новый</Tag>}
+            </Space>
+          );
+        },
       },
       {
         title: 'Расценок',
@@ -463,8 +858,62 @@ export default function ImportedRatesTab() {
         align: 'right',
         render: (n: number) => <Badge count={n} color="geekblue" showZero overflowCount={99999} />,
       },
+      {
+        title: '',
+        key: 'actions',
+        width: 130,
+        render: (_: unknown, row) => {
+          const isEditing = editingTypeId === row.id;
+          const isSaving = savingTypeId === row.id;
+          if (isEditing) {
+            return (
+              <Space size={4} onClick={(e) => e.stopPropagation()}>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<CheckOutlined />}
+                  loading={isSaving}
+                  onClick={() => saveEditType(row)}
+                />
+                <Button
+                  size="small"
+                  icon={<CloseOutlined />}
+                  disabled={isSaving}
+                  onClick={() => cancelEditType(row)}
+                />
+              </Space>
+            );
+          }
+          return (
+            <Space size={4} onClick={(e) => e.stopPropagation()}>
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                disabled={editingTypeId !== null}
+                onClick={() => startEditType(row)}
+              />
+              <Popconfirm
+                title="Удалить вид затрат?"
+                description="Удалятся только пустые виды (без расценок)."
+                okText="Да"
+                cancelText="Нет"
+                onConfirm={() => handleDeleteType(row)}
+              >
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  loading={isSaving}
+                  disabled={editingTypeId !== null}
+                />
+              </Popconfirm>
+            </Space>
+          );
+        },
+      },
     ],
-    [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editingTypeId, editingTypeName, savingTypeId],
   );
 
   const rateColumns: ColumnsType<RateLeafRow> = useMemo(
@@ -565,12 +1014,40 @@ export default function ImportedRatesTab() {
         },
       },
       {
+        title: 'Тип',
+        dataIndex: 'rate_type',
+        width: 110,
+        render: (_: unknown, row) => {
+          if (editingRateId === row.id && editBuffer) {
+            return (
+              <Select<RateKind>
+                style={{ width: '100%' }}
+                value={editBuffer.rate_type}
+                onChange={(v) =>
+                  setEditBuffer((b) => (b ? { ...b, rate_type: v } : b))
+                }
+                options={[
+                  { value: 'base', label: 'Баз' },
+                  { value: 'optional', label: 'Опц' },
+                ]}
+              />
+            );
+          }
+          return row.rate_type === 'optional' ? (
+            <Tag color="blue">Опц</Tag>
+          ) : (
+            <Tag>Баз</Tag>
+          );
+        },
+      },
+      {
         title: '',
         dataIndex: 'actions',
-        width: 110,
+        width: 130,
         render: (_: unknown, row) => {
           const isEditing = editingRateId === row.id;
           const isSaving = savingRateId === row.id;
+          const isDeleting = deletingRateId === row.id;
           if (isEditing) {
             return (
               <Space size={4}>
@@ -591,18 +1068,34 @@ export default function ImportedRatesTab() {
             );
           }
           return (
-            <Button
-              size="small"
-              icon={<EditOutlined />}
-              disabled={editingRateId !== null}
-              onClick={() => startEdit(row)}
-            />
+            <Space size={4}>
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                disabled={editingRateId !== null}
+                onClick={() => startEdit(row)}
+              />
+              <Popconfirm
+                title="Удалить расценку?"
+                okText="Да"
+                cancelText="Нет"
+                onConfirm={() => handleDeleteRate(row)}
+              >
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  loading={isDeleting}
+                  disabled={editingRateId !== null}
+                />
+              </Popconfirm>
+            </Space>
           );
         },
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingRateId, editBuffer, savingRateId],
+    [editingRateId, editBuffer, savingRateId, deletingRateId],
   );
 
   const flatColumns: ColumnsType<RateRow> = useMemo(
@@ -625,12 +1118,20 @@ export default function ImportedRatesTab() {
         align: 'right',
         render: (v: number | null) => formatPrice(v),
       },
+      {
+        title: 'Тип',
+        dataIndex: 'rate_type',
+        width: 90,
+        render: (v: RateKind) =>
+          v === 'optional' ? <Tag color="blue">Опц</Tag> : <Tag>Баз</Tag>,
+      },
     ],
     [],
   );
 
   // Раскрытие категории → таблица видов
   const renderTypesForCategory = (catRow: CategoryRow) => {
+    if (catRow.isDraft) return null;
     const list = typesByCategory[catRow.id];
     if (loadingCategoryIds.has(catRow.id) && !list) {
       return (
@@ -639,7 +1140,7 @@ export default function ImportedRatesTab() {
         </div>
       );
     }
-    const data: TypeRow[] = (list ?? [])
+    const savedRows: TypeRow[] = (list ?? [])
       .filter((t) => !typeId || t.id === typeId)
       .map((t) => ({
         rowKind: 'type',
@@ -649,22 +1150,38 @@ export default function ImportedRatesTab() {
         name: t.name,
         rates_count: t.rates_count,
       }));
+    const drafts = typeId ? [] : (draftTypesByCategory[catRow.id] ?? []);
+    const data = [...savedRows, ...drafts];
     return (
-      <Table<TypeRow>
-        size="small"
-        rowKey="key"
-        showHeader={false}
-        columns={typeColumns}
-        dataSource={data}
-        pagination={false}
-        expandable={{
-          expandedRowRender: renderRatesForType,
-          rowExpandable: () => true,
-          onExpand: (expanded, row) => {
-            if (expanded) ensureRatesLoaded(row.id);
-          },
-        }}
-      />
+      <div>
+        <Table<TypeRow>
+          size="small"
+          rowKey="key"
+          showHeader={false}
+          columns={typeColumns}
+          dataSource={data}
+          pagination={false}
+          rowClassName={(row) => (row.isDraft ? 'imported-rates-draft-row' : '')}
+          expandable={{
+            expandedRowRender: renderRatesForType,
+            rowExpandable: (row) => !row.isDraft,
+            onExpand: (expanded, row) => {
+              if (expanded) ensureRatesLoaded(row.id);
+            },
+          }}
+        />
+        <div style={{ padding: '8px 0 4px' }}>
+          <Button
+            size="small"
+            type="dashed"
+            icon={<PlusOutlined />}
+            disabled={editingTypeId !== null}
+            onClick={() => addDraftType(catRow.id)}
+          >
+            Добавить вид затрат
+          </Button>
+        </div>
+      </div>
     );
   };
 
@@ -689,6 +1206,12 @@ export default function ImportedRatesTab() {
           pagination={false}
           rowClassName={(row) => (row.isDraft ? 'imported-rates-draft-row' : '')}
           locale={{ emptyText: 'Нет расценок' }}
+          expandable={{
+            expandedRowRender: (row) => (
+              <RateMaterialsPanel rateId={row.id} catalog={materialsCatalog} />
+            ),
+            rowExpandable: (row) => !row.isDraft,
+          }}
         />
         <div style={{ padding: '8px 0 4px' }}>
           <Button
@@ -803,21 +1326,36 @@ export default function ImportedRatesTab() {
           pagination={false}
         />
       ) : (
-        <Table<CategoryRow>
-          size="small"
-          rowKey="key"
-          loading={treeLoading}
-          columns={categoryColumns}
-          dataSource={treeData}
-          pagination={false}
-          expandable={{
-            expandedRowRender: renderTypesForCategory,
-            rowExpandable: (row) => row.types_count > 0,
-            onExpand: (expanded, row) => {
-              if (expanded) ensureTypesLoaded(row.id);
-            },
-          }}
-        />
+        <>
+          <Table<CategoryRow>
+            size="small"
+            rowKey="key"
+            loading={treeLoading}
+            columns={categoryColumns}
+            dataSource={treeData}
+            pagination={false}
+            rowClassName={(row) => (row.isDraft ? 'imported-rates-draft-row' : '')}
+            expandable={{
+              expandedRowRender: renderTypesForCategory,
+              rowExpandable: (row) => !row.isDraft,
+              onExpand: (expanded, row) => {
+                if (expanded) ensureTypesLoaded(row.id);
+              },
+            }}
+          />
+          {!categoryId && (
+            <div style={{ padding: '8px 0 4px' }}>
+              <Button
+                type="dashed"
+                icon={<PlusOutlined />}
+                disabled={editingCategoryId !== null}
+                onClick={addDraftCategory}
+              >
+                Добавить категорию
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
