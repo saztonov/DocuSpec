@@ -9,6 +9,7 @@ import {
   BookOutlined,
   RobotOutlined,
   DatabaseOutlined,
+  TagsOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { MenuProps } from 'antd';
@@ -62,6 +63,12 @@ export default function HamburgerMenu({ open, onClose, docId, latestEstimateId }
       ]
     : [];
 
+  const pricesItem = {
+    key: '/prices',
+    icon: <TagsOutlined />,
+    label: 'Расценки',
+  };
+
   const serviceItems = [
     {
       key: 'service-group',
@@ -108,7 +115,7 @@ export default function HamburgerMenu({ open, onClose, docId, latestEstimateId }
     >
       <Menu
         mode="inline"
-        items={[...docItems, ...serviceItems]}
+        items={[...docItems, pricesItem, ...serviceItems]}
         onClick={handleClick}
         style={{ border: 'none' }}
       />

@@ -1,6 +1,9 @@
 {
   "permissions": {
     "allow": [
+      "Bash",
+      "Bash(curl *)",
+      "Bash(curl *api.supabase.com*)",
       "Bash(npm create vite@latest . -- --template react-ts)",
       "Bash(npm install antd @ant-design/icons @supabase/supabase-js react-router-dom zod)",
       "Bash(ls \"C:/Users/Usr/claudeprojects/DocuSpec/node_modules/antd/locale/ru_RU\"*)",

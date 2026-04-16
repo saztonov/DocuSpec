@@ -2748,6 +2748,24 @@
               "position": 5,
               "max_length": null,
               "numeric_precision": null
+            },
+            {
+              "name": "price_contract",
+              "type": "numeric",
+              "default": null,
+              "nullable": true,
+              "position": 6,
+              "max_length": null,
+              "numeric_precision": 12
+            },
+            {
+              "name": "price_own",
+              "type": "numeric",
+              "default": null,
+              "nullable": true,
+              "position": 7,
+              "max_length": null,
+              "numeric_precision": 12
             }
           ]
         },

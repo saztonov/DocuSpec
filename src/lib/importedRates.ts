@@ -6,6 +6,8 @@ export interface ParsedRate {
   type: string;
   workName: string;
   unit: string | null;
+  priceContract: number | null;
+  priceOwn: number | null;
 }
 
 export interface RateCategory {
@@ -24,16 +26,22 @@ export interface RateRow {
   type_id: string;
   work_name: string;
   unit: string | null;
+  price_contract: number | null;
+  price_own: number | null;
   type_name: string;
   category_id: string;
   category_name: string;
 }
 
-const HEADER_ALIASES: Record<keyof Omit<ParsedRate, 'unit'> | 'unit', string[]> = {
+type HeaderKey = 'category' | 'type' | 'workName' | 'unit' | 'priceContract' | 'priceOwn';
+
+const HEADER_ALIASES: Record<HeaderKey, string[]> = {
   category: ['категория затрат', 'категория'],
   type: ['вид затрат', 'вид'],
   workName: ['наименование работ', 'наименование'],
   unit: ['единица измерения', 'единица', 'ед. изм.', 'ед изм', 'ед.изм.'],
+  priceContract: ['цена подряд', 'подряд'],
+  priceOwn: ['цена собственные', 'цена собственная', 'цена собств', 'собственные'],
 };
 
 function norm(s: unknown): string {
@@ -46,6 +54,23 @@ function findColumn(headers: string[], aliases: string[]): number {
     if (aliases.some((a) => h === a || h.startsWith(a))) return i;
   }
   return -1;
+}
+
+function parsePrice(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'number') {
+    if (!Number.isFinite(raw) || raw < 0) return null;
+    return Math.round(raw * 100) / 100;
+  }
+  const s = String(raw)
+    .replace(/\u00a0/g, '')
+    .replace(/\s+/g, '')
+    .replace(',', '.')
+    .trim();
+  if (!s) return null;
+  const n = Number.parseFloat(s);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
 }
 
 export async function parseRatesXlsx(file: File): Promise<ParsedRate[]> {
@@ -61,6 +86,8 @@ export async function parseRatesXlsx(file: File): Promise<ParsedRate[]> {
   const idxType = findColumn(headers, HEADER_ALIASES.type);
   const idxWork = findColumn(headers, HEADER_ALIASES.workName);
   const idxUnit = findColumn(headers, HEADER_ALIASES.unit);
+  const idxPriceContract = findColumn(headers, HEADER_ALIASES.priceContract);
+  const idxPriceOwn = findColumn(headers, HEADER_ALIASES.priceOwn);
 
   if (idxCategory < 0 || idxType < 0 || idxWork < 0 || idxUnit < 0) {
     throw new Error(
@@ -76,7 +103,16 @@ export async function parseRatesXlsx(file: File): Promise<ParsedRate[]> {
     const workName = String(r[idxWork] ?? '').trim();
     const unit = String(r[idxUnit] ?? '').trim();
     if (!category || !type || !workName) continue;
-    out.push({ category, type, workName, unit: unit || null });
+    const priceContract = idxPriceContract >= 0 ? parsePrice(r[idxPriceContract]) : null;
+    const priceOwn = idxPriceOwn >= 0 ? parsePrice(r[idxPriceOwn]) : null;
+    out.push({
+      category,
+      type,
+      workName,
+      unit: unit || null,
+      priceContract,
+      priceOwn,
+    });
   }
   return out;
 }
@@ -139,18 +175,31 @@ export async function importRates(rows: ParsedRate[]): Promise<{
   );
 
   // 3. Расценки — порциями по 500
-  const ratePayload = rows
+  type RatePayload = {
+    type_id: string;
+    work_name: string;
+    unit: string | null;
+    price_contract: number | null;
+    price_own: number | null;
+  };
+  const ratePayload: RatePayload[] = rows
     .map((r) => {
       const catId = catMap.get(r.category);
       if (!catId) return null;
       const typeId = typeMap.get(`${catId}${typeKeySep}${r.type}`);
       if (!typeId) return null;
-      return { type_id: typeId, work_name: r.workName, unit: r.unit };
+      return {
+        type_id: typeId,
+        work_name: r.workName,
+        unit: r.unit,
+        price_contract: r.priceContract,
+        price_own: r.priceOwn,
+      } satisfies RatePayload;
     })
-    .filter((x): x is { type_id: string; work_name: string; unit: string | null } => !!x);
+    .filter((x): x is RatePayload => !!x);
 
   // Дедуп по (type_id, work_name) — иначе upsert отдельной партии ругнётся
-  const rateDedup = new Map<string, { type_id: string; work_name: string; unit: string | null }>();
+  const rateDedup = new Map<string, RatePayload>();
   for (const r of ratePayload) {
     rateDedup.set(`${r.type_id}${typeKeySep}${r.work_name}`, r);
   }
@@ -199,7 +248,7 @@ export async function loadRates(params: {
   let q = supabase
     .from('imported_rates')
     .select(
-      'id, type_id, work_name, unit, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
+      'id, type_id, work_name, unit, price_contract, price_own, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
       { count: 'exact' },
     );
 
@@ -222,6 +271,8 @@ export async function loadRates(params: {
     type_id: r.type_id,
     work_name: r.work_name,
     unit: r.unit,
+    price_contract: r.price_contract !== null ? Number(r.price_contract) : null,
+    price_own: r.price_own !== null ? Number(r.price_own) : null,
     type_name: r.imported_rate_types?.name ?? '',
     category_id: r.imported_rate_types?.category_id ?? '',
     category_name: r.imported_rate_types?.imported_rate_categories?.name ?? '',
@@ -275,7 +326,7 @@ export async function loadRatesByType(typeId: string): Promise<RateRow[]> {
   const { data, error } = await supabase
     .from('imported_rates')
     .select(
-      'id, type_id, work_name, unit, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
+      'id, type_id, work_name, unit, price_contract, price_own, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
     )
     .eq('type_id', typeId)
     .order('work_name');
@@ -285,8 +336,85 @@ export async function loadRatesByType(typeId: string): Promise<RateRow[]> {
     type_id: r.type_id,
     work_name: r.work_name,
     unit: r.unit,
+    price_contract: r.price_contract !== null ? Number(r.price_contract) : null,
+    price_own: r.price_own !== null ? Number(r.price_own) : null,
     type_name: r.imported_rate_types?.name ?? '',
     category_id: r.imported_rate_types?.category_id ?? '',
     category_name: r.imported_rate_types?.imported_rate_categories?.name ?? '',
   }));
+}
+
+export interface ImportedRateInput {
+  type_id: string;
+  work_name: string;
+  unit: string | null;
+  price_contract: number | null;
+  price_own: number | null;
+}
+
+export async function createImportedRate(input: ImportedRateInput): Promise<RateRow> {
+  const { data, error } = await supabase
+    .from('imported_rates')
+    .insert({
+      type_id: input.type_id,
+      work_name: input.work_name,
+      unit: input.unit,
+      price_contract: input.price_contract,
+      price_own: input.price_own,
+    })
+    .select(
+      'id, type_id, work_name, unit, price_contract, price_own, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
+    )
+    .single();
+
+  if (error) {
+    if ((error as any).code === '23505') {
+      throw new Error('Расценка с таким наименованием уже есть в этом виде затрат.');
+    }
+    throw error;
+  }
+  const r: any = data;
+  return {
+    id: r.id,
+    type_id: r.type_id,
+    work_name: r.work_name,
+    unit: r.unit,
+    price_contract: r.price_contract !== null ? Number(r.price_contract) : null,
+    price_own: r.price_own !== null ? Number(r.price_own) : null,
+    type_name: r.imported_rate_types?.name ?? '',
+    category_id: r.imported_rate_types?.category_id ?? '',
+    category_name: r.imported_rate_types?.imported_rate_categories?.name ?? '',
+  };
+}
+
+export type ImportedRatePatch = Partial<Pick<ImportedRateInput, 'work_name' | 'unit' | 'price_contract' | 'price_own'>>;
+
+export async function updateImportedRate(id: string, patch: ImportedRatePatch): Promise<RateRow> {
+  const { data, error } = await supabase
+    .from('imported_rates')
+    .update(patch)
+    .eq('id', id)
+    .select(
+      'id, type_id, work_name, unit, price_contract, price_own, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
+    )
+    .single();
+
+  if (error) {
+    if ((error as any).code === '23505') {
+      throw new Error('Расценка с таким наименованием уже есть в этом виде затрат.');
+    }
+    throw error;
+  }
+  const r: any = data;
+  return {
+    id: r.id,
+    type_id: r.type_id,
+    work_name: r.work_name,
+    unit: r.unit,
+    price_contract: r.price_contract !== null ? Number(r.price_contract) : null,
+    price_own: r.price_own !== null ? Number(r.price_own) : null,
+    type_name: r.imported_rate_types?.name ?? '',
+    category_id: r.imported_rate_types?.category_id ?? '',
+    category_name: r.imported_rate_types?.imported_rate_categories?.name ?? '',
+  };
 }
