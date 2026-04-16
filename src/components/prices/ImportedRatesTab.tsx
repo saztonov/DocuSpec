@@ -86,6 +86,7 @@ type RateLeafRow = {
   price_contract: number | null;
   price_own: number | null;
   rate_type: RateKind;
+  materials_count: number;
   isDraft?: boolean;
 };
 
@@ -305,6 +306,7 @@ export default function ImportedRatesTab() {
           price_contract: r.price_contract,
           price_own: r.price_own,
           rate_type: r.rate_type,
+          materials_count: r.materials_count ?? 0,
         }));
         setRatesByType((m) => ({ ...m, [tId]: leafRows }));
       } catch (e: any) {
@@ -378,6 +380,7 @@ export default function ImportedRatesTab() {
                   price_contract: created.price_contract,
                   price_own: created.price_own,
                   rate_type: created.rate_type,
+                  materials_count: 0,
                 } as RateLeafRow)
               : r,
           );
@@ -441,6 +444,7 @@ export default function ImportedRatesTab() {
       price_contract: null,
       price_own: null,
       rate_type: 'base',
+      materials_count: 0,
       isDraft: true,
     };
     setRatesByType((m) => {
@@ -1270,9 +1274,35 @@ export default function ImportedRatesTab() {
                 catalog={materialsCatalog}
                 autoOpenDraft={addMaterialForRateId === row.id}
                 onDraftOpened={() => setAddMaterialForRateId(null)}
+                onMaterialsCountChange={(count) =>
+                  setRatesByType((m) => {
+                    const lst = m[row.type_id];
+                    if (!lst) return m;
+                    return {
+                      ...m,
+                      [row.type_id]: lst.map((r) =>
+                        r.id === row.id ? { ...r, materials_count: count } : r,
+                      ),
+                    };
+                  })
+                }
               />
             ),
             rowExpandable: (row) => !row.isDraft,
+            expandIcon: ({ expanded, onExpand, record }) => {
+              if (record.isDraft) return null;
+              if (!expanded && record.materials_count === 0) return null;
+              return (
+                <Button
+                  type="text"
+                  size="small"
+                  onClick={(e) => onExpand(record, e)}
+                  style={{ padding: 0, width: 16, height: 16, lineHeight: 1 }}
+                >
+                  {expanded ? '−' : '+'}
+                </Button>
+              );
+            },
           }}
         />
       </div>

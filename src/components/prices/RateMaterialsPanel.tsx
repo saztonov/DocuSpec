@@ -40,6 +40,7 @@ interface Props {
   catalog: MaterialsCatalog;
   autoOpenDraft?: boolean;
   onDraftOpened?: () => void;
+  onMaterialsCountChange?: (count: number) => void;
 }
 
 const priceFmt = new Intl.NumberFormat('ru-RU', {
@@ -95,6 +96,7 @@ export default function RateMaterialsPanel({
   catalog,
   autoOpenDraft,
   onDraftOpened,
+  onMaterialsCountChange,
 }: Props) {
   const { message } = App.useApp();
 
@@ -110,12 +112,13 @@ export default function RateMaterialsPanel({
     try {
       const data = await loadRateMaterials(rateId);
       setRows(data);
+      onMaterialsCountChange?.(data.length);
     } catch (err) {
       if (err instanceof Error) message.error(err.message);
     } finally {
       setLoading(false);
     }
-  }, [rateId, message]);
+  }, [rateId, message, onMaterialsCountChange]);
 
   useEffect(() => {
     void refresh();
@@ -355,15 +358,16 @@ export default function RateMaterialsPanel({
 
   return (
     <div style={{ padding: '8px 4px' }}>
-      <Table<RateMaterialRow>
-        rowKey="id"
-        size="small"
-        columns={columns}
-        dataSource={rows}
-        pagination={false}
-        loading={loading || catalog.loading}
-        locale={{ emptyText: 'Материалы не привязаны' }}
-      />
+      {rows.length > 0 ? (
+        <Table<RateMaterialRow>
+          rowKey="id"
+          size="small"
+          columns={columns}
+          dataSource={rows}
+          pagination={false}
+          loading={loading || catalog.loading}
+        />
+      ) : null}
       {draft ? (
         <div
           style={{

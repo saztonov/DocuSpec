@@ -34,6 +34,7 @@ export interface RateRow {
   type_name: string;
   category_id: string;
   category_name: string;
+  materials_count?: number;
 }
 
 export interface RateMaterialRow {
@@ -342,7 +343,7 @@ export async function loadRatesByType(typeId: string): Promise<RateRow[]> {
   const { data, error } = await supabase
     .from('imported_rates')
     .select(
-      'id, type_id, work_name, unit, price_contract, price_own, rate_type, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
+      'id, type_id, work_name, unit, price_contract, price_own, rate_type, imported_rate_materials(count), imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
     )
     .eq('type_id', typeId)
     .order('work_name');
@@ -358,6 +359,7 @@ export async function loadRatesByType(typeId: string): Promise<RateRow[]> {
     type_name: r.imported_rate_types?.name ?? '',
     category_id: r.imported_rate_types?.category_id ?? '',
     category_name: r.imported_rate_types?.imported_rate_categories?.name ?? '',
+    materials_count: r.imported_rate_materials?.[0]?.count ?? 0,
   }));
 }
 
