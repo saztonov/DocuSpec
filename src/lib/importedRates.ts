@@ -193,10 +193,8 @@ export async function loadRates(params: {
   categoryId?: string | null;
   typeId?: string | null;
   search?: string;
-  limit?: number;
-  offset?: number;
 }): Promise<{ rows: RateRow[]; total: number }> {
-  const { categoryId, typeId, search, limit = 50, offset = 0 } = params;
+  const { categoryId, typeId, search } = params;
 
   let q = supabase
     .from('imported_rates')
@@ -214,7 +212,7 @@ export async function loadRates(params: {
     q = q.ilike('work_name', `%${search.trim()}%`);
   }
 
-  q = q.order('work_name').range(offset, offset + limit - 1);
+  q = q.order('work_name');
 
   const { data, error, count } = await q;
   if (error) throw error;
@@ -230,4 +228,65 @@ export async function loadRates(params: {
   }));
 
   return { rows, total: count ?? 0 };
+}
+
+export interface RateCategoryNode {
+  id: string;
+  name: string;
+  types_count: number;
+}
+
+export interface RateTypeNode {
+  id: string;
+  category_id: string;
+  name: string;
+  rates_count: number;
+}
+
+export async function loadCategoriesWithCounts(): Promise<RateCategoryNode[]> {
+  const { data, error } = await supabase
+    .from('imported_rate_categories')
+    .select('id, name, imported_rate_types(count)')
+    .order('name');
+  if (error) throw error;
+  return (data ?? []).map((c: any) => ({
+    id: c.id,
+    name: c.name,
+    types_count: c.imported_rate_types?.[0]?.count ?? 0,
+  }));
+}
+
+export async function loadTypesWithCounts(categoryId: string): Promise<RateTypeNode[]> {
+  const { data, error } = await supabase
+    .from('imported_rate_types')
+    .select('id, category_id, name, imported_rates(count)')
+    .eq('category_id', categoryId)
+    .order('name');
+  if (error) throw error;
+  return (data ?? []).map((t: any) => ({
+    id: t.id,
+    category_id: t.category_id,
+    name: t.name,
+    rates_count: t.imported_rates?.[0]?.count ?? 0,
+  }));
+}
+
+export async function loadRatesByType(typeId: string): Promise<RateRow[]> {
+  const { data, error } = await supabase
+    .from('imported_rates')
+    .select(
+      'id, type_id, work_name, unit, imported_rate_types!inner(id, name, category_id, imported_rate_categories!inner(id, name))',
+    )
+    .eq('type_id', typeId)
+    .order('work_name');
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    type_id: r.type_id,
+    work_name: r.work_name,
+    unit: r.unit,
+    type_name: r.imported_rate_types?.name ?? '',
+    category_id: r.imported_rate_types?.category_id ?? '',
+    category_name: r.imported_rate_types?.imported_rate_categories?.name ?? '',
+  }));
 }

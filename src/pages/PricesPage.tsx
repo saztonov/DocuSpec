@@ -3,9 +3,8 @@ import { Tabs, Typography } from 'antd';
 import { useSearchParams } from 'react-router-dom';
 import FsnbExplorer from '../components/prices/FsnbExplorer';
 import ImportedRatesTab from '../components/prices/ImportedRatesTab';
-import CustomRatesTab from '../components/customRates/CustomRatesTab';
 
-const TAB_KEYS = ['fsnb', 'estimates', 'corp'] as const;
+const TAB_KEYS = ['fsnb', 'estimates'] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 
 export default function PricesPage() {
@@ -38,11 +37,6 @@ export default function PricesPage() {
             key: 'estimates',
             label: 'Сметные расценки',
             children: <ImportedRatesTab />,
-          },
-          {
-            key: 'corp',
-            label: 'Новые расценки',
-            children: <CustomRatesTab />,
           },
         ]}
       />
