@@ -1,7 +1,15 @@
-import { useState } from 'react';
-import { Typography, Dropdown, Button, Modal, Form, Input, App, Space, Tag } from 'antd';
-import { UserOutlined, LogoutOutlined, KeyOutlined, SettingOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { Typography, Drawer, Menu, Button, Modal, Form, Input, App, Space, Tag } from 'antd';
+import type { MenuProps } from 'antd';
+import {
+  MenuOutlined,
+  UserOutlined,
+  LogoutOutlined,
+  KeyOutlined,
+  SettingOutlined,
+  FileTextOutlined,
+} from '@ant-design/icons';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 
 const { Text } = Typography;
@@ -13,8 +21,10 @@ interface ChangePasswordValues {
 
 export default function AppHeader() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { profile, signOut, updateOwnPassword } = useAuth();
   const { message } = App.useApp();
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [pwdOpen, setPwdOpen] = useState(false);
   const [pwdSaving, setPwdSaving] = useState(false);
   const [pwdForm] = Form.useForm<ChangePasswordValues>();
@@ -49,6 +59,37 @@ export default function AppHeader() {
 
   const isAdmin = profile?.role === 'admin';
 
+  const selectedKey = useMemo(() => {
+    if (location.pathname.startsWith('/admin')) return '/admin';
+    return '/';
+  }, [location.pathname]);
+
+  const navItems: MenuProps['items'] = [
+    { key: '/', label: 'Расценки', icon: <FileTextOutlined /> },
+    ...(isAdmin
+      ? [{ key: '/admin', label: 'Администрирование', icon: <SettingOutlined /> }]
+      : []),
+  ];
+
+  const actionItems: MenuProps['items'] = [
+    { key: 'pwd', label: 'Сменить пароль', icon: <KeyOutlined /> },
+    { key: 'logout', label: 'Выйти', icon: <LogoutOutlined /> },
+  ];
+
+  function handleNavClick({ key }: { key: string }) {
+    setDrawerOpen(false);
+    navigate(key);
+  }
+
+  function handleActionClick({ key }: { key: string }) {
+    setDrawerOpen(false);
+    if (key === 'pwd') {
+      setPwdOpen(true);
+    } else if (key === 'logout') {
+      void handleSignOut();
+    }
+  }
+
   return (
     <div
       style={{
@@ -65,6 +106,13 @@ export default function AppHeader() {
         gap: 12,
       }}
     >
+      <Button
+        type="text"
+        icon={<MenuOutlined />}
+        onClick={() => setDrawerOpen(true)}
+        aria-label="Открыть меню"
+      />
+
       <Text
         strong
         style={{ fontSize: 18, cursor: 'pointer', whiteSpace: 'nowrap' }}
@@ -75,31 +123,55 @@ export default function AppHeader() {
 
       <div style={{ flex: 1 }} />
 
-      {isAdmin && (
-        <Button type="text" icon={<SettingOutlined />} onClick={() => navigate('/admin')}>
-          Администрирование
-        </Button>
-      )}
-
-      {profile && (
-        <Dropdown
-          trigger={['click']}
-          menu={{
-            items: [
-              { key: 'pwd', label: 'Сменить пароль', icon: <KeyOutlined />, onClick: () => setPwdOpen(true) },
-              { type: 'divider' },
-              { key: 'logout', label: 'Выйти', icon: <LogoutOutlined />, onClick: () => void handleSignOut() },
-            ],
-          }}
-        >
-          <Button type="text" icon={<UserOutlined />}>
-            <Space size={6}>
-              <span>{profile.full_name || profile.email}</span>
-              {profile.role === 'admin' && <Tag color="gold" style={{ margin: 0 }}>admin</Tag>}
+      <Drawer
+        placement="left"
+        width={280}
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        styles={{ body: { padding: 0 } }}
+        title="DocuSpec"
+      >
+        {profile && (
+          <div
+            style={{
+              padding: '12px 16px',
+              borderBottom: '1px solid #f0f0f0',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <UserOutlined style={{ fontSize: 16, color: '#888' }} />
+            <Space size={6} style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {profile.full_name || profile.email}
+              </span>
+              {isAdmin && <Tag color="gold" style={{ margin: 0 }}>admin</Tag>}
             </Space>
-          </Button>
-        </Dropdown>
-      )}
+          </div>
+        )}
+
+        <Menu
+          mode="inline"
+          selectedKeys={[selectedKey]}
+          items={navItems}
+          onClick={handleNavClick}
+          style={{ borderInlineEnd: 'none' }}
+        />
+
+        {profile && (
+          <>
+            <div style={{ borderTop: '1px solid #f0f0f0' }} />
+            <Menu
+              mode="inline"
+              selectable={false}
+              items={actionItems}
+              onClick={handleActionClick}
+              style={{ borderInlineEnd: 'none' }}
+            />
+          </>
+        )}
+      </Drawer>
 
       <Modal
         title="Смена пароля"
