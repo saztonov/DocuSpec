@@ -8,3 +8,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// Изолированный клиент для admin-операций signUp: чтобы создание нового
+// пользователя через админку не перезаписывало текущую сессию администратора.
+export const supabaseSignup = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    storageKey: 'sb-signup-isolated',
+  },
+});

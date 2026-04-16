@@ -5,6 +5,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useProjects } from '../hooks/useProjects.ts';
 import type { DbProject } from '../types/database.ts';
 import FsnbTab from '../components/admin/FsnbTab.tsx';
+import UsersTab from '../components/admin/UsersTab.tsx';
 import AppHeader from '../components/layout/AppHeader.tsx';
 
 const { Title } = Typography;
@@ -119,6 +120,7 @@ export default function AdminPage() {
   const items = [
     { key: 'projects', label: 'Объекты', children: <ProjectsTab /> },
     { key: 'fsnb', label: 'Справочники ФСНБ', children: <FsnbTab /> },
+    { key: 'users', label: 'Пользователи', children: <UsersTab /> },
   ];
 
   return (

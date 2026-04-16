@@ -3,6 +3,9 @@ import { ConfigProvider, Layout, App as AntApp } from 'antd';
 import ruRU from 'antd/locale/ru_RU';
 import AdminPage from './pages/AdminPage.tsx';
 import PricesPage from './pages/PricesPage.tsx';
+import LoginPage from './pages/LoginPage.tsx';
+import { AuthProvider } from './hooks/useAuth.tsx';
+import RequireAuth from './components/auth/RequireAuth.tsx';
 
 const { Content } = Layout;
 
@@ -11,8 +14,23 @@ function AppLayout() {
     <Layout style={{ minHeight: '100vh', background: '#f5f5f5' }}>
       <Content>
         <Routes>
-          <Route path="/" element={<PricesPage />} />
-          <Route path="/admin" element={<AdminPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <PricesPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <RequireAuth requireAdmin>
+                <AdminPage />
+              </RequireAuth>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Content>
@@ -39,7 +57,9 @@ export default function App() {
     >
       <AntApp>
         <BrowserRouter>
-          <AppLayout />
+          <AuthProvider>
+            <AppLayout />
+          </AuthProvider>
         </BrowserRouter>
       </AntApp>
     </ConfigProvider>
