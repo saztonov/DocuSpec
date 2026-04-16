@@ -1183,7 +1183,9 @@ export default function ImportedRatesTab() {
           columns={typeColumns}
           dataSource={data}
           pagination={false}
-          rowClassName={(row) => (row.isDraft ? 'imported-rates-draft-row' : '')}
+          rowClassName={(row) =>
+            row.isDraft ? 'imported-rates-draft-row' : 'imported-rates-type-row'
+          }
           expandable={{
             expandedRowRender: renderRatesForType,
             rowExpandable: (row) => !row.isDraft,
@@ -1320,7 +1322,11 @@ export default function ImportedRatesTab() {
   return (
     <div>
       {msgCtx}
-      <style>{`.imported-rates-draft-row > td { background-color: #fffbe6 !important; }`}</style>
+      <style>{`
+        .imported-rates-category-row > td { background-color: #e6f4ff !important; }
+        .imported-rates-type-row > td { background-color: #f6ffed !important; }
+        .imported-rates-draft-row > td { background-color: #fffbe6 !important; }
+      `}</style>
 
       <div
         style={{
@@ -1431,7 +1437,9 @@ export default function ImportedRatesTab() {
             columns={categoryColumns}
             dataSource={treeData}
             pagination={false}
-            rowClassName={(row) => (row.isDraft ? 'imported-rates-draft-row' : '')}
+            rowClassName={(row) =>
+              row.isDraft ? 'imported-rates-draft-row' : 'imported-rates-category-row'
+            }
             expandable={{
               expandedRowRender: renderTypesForCategory,
               rowExpandable: (row) => !row.isDraft,
