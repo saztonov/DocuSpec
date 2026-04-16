@@ -1,17 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Tabs, Typography } from 'antd';
 import { useSearchParams } from 'react-router-dom';
 import FsnbExplorer from '../components/prices/FsnbExplorer';
 import ImportedRatesTab from '../components/prices/ImportedRatesTab';
 import AppHeader from '../components/layout/AppHeader.tsx';
-import HamburgerMenu from '../components/layout/HamburgerMenu.tsx';
 
 const TAB_KEYS = ['fsnb', 'estimates'] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 
 export default function PricesPage() {
   const [params, setParams] = useSearchParams();
-  const [menuOpen, setMenuOpen] = useState(false);
   const tab = useMemo<TabKey>(() => {
     const t = params.get('tab') as TabKey | null;
     return t && TAB_KEYS.includes(t) ? t : 'fsnb';
@@ -23,8 +21,7 @@ export default function PricesPage() {
 
   return (
     <>
-      <AppHeader onMenuClick={() => setMenuOpen(true)} />
-      <HamburgerMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
+      <AppHeader />
       <div style={{ padding: '16px 24px' }}>
         <Typography.Title level={3} style={{ marginTop: 0 }}>
           Расценки

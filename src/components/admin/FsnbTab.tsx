@@ -227,7 +227,7 @@ export default function FsnbTab() {
   }, [searchType, message]);
 
   const fileCount = Object.keys(jsonFiles).length;
-  const totalRecords = Object.values(jsonFiles).reduce(
+  const totalRecords = Object.values(jsonFiles).reduce<number>(
     (sum, data) => sum + (Array.isArray(data) ? data.length : 0),
     0,
   );

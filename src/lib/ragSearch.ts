@@ -237,8 +237,8 @@ export async function searchResources(
   try {
     const queryEmbedding = await embedText(query);
 
-    const { data, error } = await enqueueDb(() =>
-      supabase.rpc('hybrid_search_resources', {
+    const { data, error } = await enqueueDb(async () =>
+      await supabase.rpc('hybrid_search_resources', {
         query_embedding: queryEmbedding,
         query_text: query,
         resource_type_filter: resourceType ?? null,
@@ -338,8 +338,8 @@ export async function searchNorms(
   try {
     const queryEmbedding = await embedText(query);
 
-    const { data, error } = await enqueueDb(() =>
-      supabase.rpc('hybrid_search_norms', {
+    const { data, error } = await enqueueDb(async () =>
+      await supabase.rpc('hybrid_search_norms', {
         query_embedding: queryEmbedding,
         query_text: query,
         base_type_filter: baseType ?? null,
