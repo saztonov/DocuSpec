@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Badge,
   Button,
-  Card,
   Input,
   InputNumber,
   Popconfirm,
@@ -11,12 +10,14 @@ import {
   Spin,
   Table,
   Tag,
+  Tooltip,
   Upload,
   Typography,
   message,
 } from 'antd';
 import {
   InboxOutlined,
+  InfoCircleOutlined,
   UploadOutlined,
   ReloadOutlined,
   EditOutlined,
@@ -154,6 +155,10 @@ export default function ImportedRatesTab() {
   const [editingTypeId, setEditingTypeId] = useState<string | null>(null);
   const [editingTypeName, setEditingTypeName] = useState<string>('');
   const [savingTypeId, setSavingTypeId] = useState<string | null>(null);
+
+  // Раскрытие расценок + сигнал на добавление материала
+  const [expandedRateKeys, setExpandedRateKeys] = useState<string[]>([]);
+  const [addMaterialForRateId, setAddMaterialForRateId] = useState<string | null>(null);
 
   const flatMode = appliedSearch.trim().length > 0;
 
@@ -1043,7 +1048,7 @@ export default function ImportedRatesTab() {
       {
         title: '',
         dataIndex: 'actions',
-        width: 130,
+        width: 160,
         render: (_: unknown, row) => {
           const isEditing = editingRateId === row.id;
           const isSaving = savingRateId === row.id;
@@ -1069,6 +1074,19 @@ export default function ImportedRatesTab() {
           }
           return (
             <Space size={4}>
+              <Tooltip title="Добавить материал">
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  disabled={editingRateId !== null || row.isDraft}
+                  onClick={() => {
+                    setExpandedRateKeys((prev) =>
+                      prev.includes(row.key) ? prev : [...prev, row.key],
+                    );
+                    setAddMaterialForRateId(row.id);
+                  }}
+                />
+              </Tooltip>
               <Button
                 size="small"
                 icon={<EditOutlined />}
@@ -1185,7 +1203,7 @@ export default function ImportedRatesTab() {
     );
   };
 
-  // Раскрытие вида → таблица расценок + кнопка добавления
+  // Раскрытие вида → таблица расценок + зелёная кнопка в шапке колонки
   const renderRatesForType = (typeRow: TypeRow) => {
     const list = ratesByType[typeRow.id];
     if (loadingTypeIds.has(typeRow.id) && !list) {
@@ -1196,125 +1214,174 @@ export default function ImportedRatesTab() {
       );
     }
     const data = list ?? [];
+    const columnsForType = rateColumns.map((col) => {
+      if ('dataIndex' in col && col.dataIndex === 'work_name') {
+        return {
+          ...col,
+          title: (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <span>Наименование работ</span>
+              <Button
+                size="small"
+                icon={<PlusOutlined />}
+                disabled={editingRateId !== null}
+                onClick={() => addDraftRate(typeRow.id)}
+                style={{ borderColor: '#52c41a', color: '#52c41a' }}
+              >
+                Добавить расценку
+              </Button>
+            </div>
+          ),
+        };
+      }
+      return col;
+    });
     return (
       <div>
         <Table<RateLeafRow>
           size="small"
           rowKey="key"
-          columns={rateColumns}
+          columns={columnsForType}
           dataSource={data}
           pagination={false}
           rowClassName={(row) => (row.isDraft ? 'imported-rates-draft-row' : '')}
           locale={{ emptyText: 'Нет расценок' }}
           expandable={{
+            expandedRowKeys: expandedRateKeys,
+            onExpand: (expanded, row) => {
+              setExpandedRateKeys((prev) =>
+                expanded
+                  ? prev.includes(row.key)
+                    ? prev
+                    : [...prev, row.key]
+                  : prev.filter((k) => k !== row.key),
+              );
+            },
             expandedRowRender: (row) => (
-              <RateMaterialsPanel rateId={row.id} catalog={materialsCatalog} />
+              <RateMaterialsPanel
+                rateId={row.id}
+                catalog={materialsCatalog}
+                autoOpenDraft={addMaterialForRateId === row.id}
+                onDraftOpened={() => setAddMaterialForRateId(null)}
+              />
             ),
             rowExpandable: (row) => !row.isDraft,
           }}
         />
-        <div style={{ padding: '8px 0 4px' }}>
-          <Button
-            size="small"
-            type="dashed"
-            icon={<PlusOutlined />}
-            disabled={editingRateId !== null}
-            onClick={() => addDraftRate(typeRow.id)}
-          >
-            Добавить расценку
-          </Button>
-        </div>
       </div>
     );
   };
+
+  const importHint = (
+    <span>
+      Обязательные столбцы: «Категория затрат», «Вид затрат», «Наименование работ»,
+      «Единица измерения». Опциональные: «Цена Подряд», «Цена собственные» — если заданы,
+      заменят текущие цены при повторном импорте.
+    </span>
+  );
 
   return (
     <div>
       {msgCtx}
       <style>{`.imported-rates-draft-row > td { background-color: #fffbe6 !important; }`}</style>
-      <Card size="small" style={{ marginBottom: 12 }}>
-        <Space direction="vertical" style={{ width: '100%' }} size="small">
-          <Typography.Text strong>Импорт расценок из Excel</Typography.Text>
-          <Space wrap>
-            <Upload
-              accept=".xlsx,.xls"
-              beforeUpload={handleFile}
-              showUploadList={false}
-              maxCount={1}
-            >
-              <Button icon={<UploadOutlined />}>Выбрать файл</Button>
-            </Upload>
-            {parsed && (
-              <>
-                <Typography.Text type="secondary">
-                  {fileName}: {parsed.length} строк
-                </Typography.Text>
-                <Button
-                  type="primary"
-                  icon={<InboxOutlined />}
-                  loading={importing}
-                  onClick={handleImport}
-                >
-                  Импортировать в БД
-                </Button>
-                <Button
-                  onClick={() => {
-                    setParsed(null);
-                    setFileName('');
-                  }}
-                >
-                  Отменить
-                </Button>
-              </>
-            )}
-          </Space>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            Обязательные столбцы: «Категория затрат», «Вид затрат», «Наименование работ»,
-            «Единица измерения». Опциональные: «Цена Подряд», «Цена собственные» — если заданы,
-            заменят текущие цены при повторном импорте.
-          </Typography.Text>
-        </Space>
-      </Card>
 
-      <Card size="small" style={{ marginBottom: 12 }}>
-        <Space wrap>
-          <Select
-            style={{ minWidth: 260 }}
-            placeholder="Категория затрат"
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            value={categoryId}
-            onChange={(v) => handleCategoryChange(v ?? null)}
-            options={categories.map((c) => ({ label: c.name, value: c.id }))}
-          />
-          <Select
-            style={{ minWidth: 260 }}
-            placeholder="Вид затрат"
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            value={typeId}
-            onChange={(v) => handleTypeChange(v ?? null)}
-            options={types.map((t) => ({ label: t.name, value: t.id }))}
-          />
-          <Input.Search
-            style={{ width: 320 }}
-            placeholder="Поиск по наименованию работ"
-            allowClear
-            value={search}
-            onChange={(e) => {
-              const v = e.target.value;
-              setSearch(v);
-              if (v.trim() === '') setAppliedSearch('');
-            }}
-            onSearch={(v) => setAppliedSearch(v)}
-          />
-          <Button icon={<ReloadOutlined />} onClick={handleReset}>
-            Сбросить
-          </Button>
-        </Space>
-      </Card>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 8,
+          alignItems: 'center',
+          marginBottom: 12,
+        }}
+      >
+        <Select
+          style={{ minWidth: 260 }}
+          placeholder="Категория затрат"
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          value={categoryId}
+          onChange={(v) => handleCategoryChange(v ?? null)}
+          options={categories.map((c) => ({ label: c.name, value: c.id }))}
+        />
+        <Select
+          style={{ minWidth: 260 }}
+          placeholder="Вид затрат"
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          value={typeId}
+          onChange={(v) => handleTypeChange(v ?? null)}
+          options={types.map((t) => ({ label: t.name, value: t.id }))}
+        />
+        <Input.Search
+          style={{ width: 320 }}
+          placeholder="Поиск по наименованию работ"
+          allowClear
+          value={search}
+          onChange={(e) => {
+            const v = e.target.value;
+            setSearch(v);
+            if (v.trim() === '') setAppliedSearch('');
+          }}
+          onSearch={(v) => setAppliedSearch(v)}
+        />
+        <Button icon={<ReloadOutlined />} onClick={handleReset}>
+          Сбросить
+        </Button>
+
+        <div
+          style={{
+            marginLeft: 'auto',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 8,
+            alignItems: 'center',
+          }}
+        >
+          {parsed && (
+            <>
+              <Typography.Text type="secondary">
+                {fileName}: {parsed.length} строк
+              </Typography.Text>
+              <Button
+                type="primary"
+                icon={<InboxOutlined />}
+                loading={importing}
+                onClick={handleImport}
+              >
+                Импортировать в БД
+              </Button>
+              <Button
+                onClick={() => {
+                  setParsed(null);
+                  setFileName('');
+                }}
+              >
+                Отменить
+              </Button>
+            </>
+          )}
+          <Upload
+            accept=".xlsx,.xls"
+            beforeUpload={handleFile}
+            showUploadList={false}
+            maxCount={1}
+          >
+            <Button icon={<UploadOutlined />}>Импорт Excel</Button>
+          </Upload>
+          <Tooltip title={importHint}>
+            <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
+          </Tooltip>
+        </div>
+      </div>
 
       {flatMode ? (
         <Table<RateRow>

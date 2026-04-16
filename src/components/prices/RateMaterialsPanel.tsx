@@ -19,7 +19,6 @@ import {
   CloseOutlined,
   DeleteOutlined,
   EditOutlined,
-  PlusOutlined,
 } from '@ant-design/icons';
 import {
   addRateMaterial,
@@ -39,6 +38,8 @@ import type { MaterialsCatalog } from '../../hooks/useMaterialsCatalog';
 interface Props {
   rateId: string;
   catalog: MaterialsCatalog;
+  autoOpenDraft?: boolean;
+  onDraftOpened?: () => void;
 }
 
 const priceFmt = new Intl.NumberFormat('ru-RU', {
@@ -89,7 +90,12 @@ type EditBuffer = {
   rateType: RateKind;
 };
 
-export default function RateMaterialsPanel({ rateId, catalog }: Props) {
+export default function RateMaterialsPanel({
+  rateId,
+  catalog,
+  autoOpenDraft,
+  onDraftOpened,
+}: Props) {
   const { message } = App.useApp();
 
   const [rows, setRows] = useState<RateMaterialRow[]>([]);
@@ -115,10 +121,12 @@ export default function RateMaterialsPanel({ rateId, catalog }: Props) {
     void refresh();
   }, [refresh]);
 
-  const openDraft = () => {
-    if (draft || editingId) return;
-    setDraft(emptyDraft());
-  };
+  useEffect(() => {
+    if (autoOpenDraft && !draft && !editingId) {
+      setDraft(emptyDraft());
+      onDraftOpened?.();
+    }
+  }, [autoOpenDraft, draft, editingId, onDraftOpened]);
 
   const cancelDraft = () => {
     setDraft(null);
@@ -232,7 +240,7 @@ export default function RateMaterialsPanel({ rateId, catalog }: Props) {
   const columns = useMemo<ColumnsType<RateMaterialRow>>(
     () => [
       {
-        title: 'Материал',
+        title: '',
         dataIndex: 'material_name',
         key: 'material_name',
       },
@@ -347,9 +355,6 @@ export default function RateMaterialsPanel({ rateId, catalog }: Props) {
 
   return (
     <div style={{ padding: '8px 4px' }}>
-      <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
-        Материалы расценки
-      </Typography.Text>
       <Table<RateMaterialRow>
         rowKey="id"
         size="small"
@@ -514,24 +519,12 @@ export default function RateMaterialsPanel({ rateId, catalog }: Props) {
             </div>
           ) : null}
         </div>
-      ) : (
+      ) : null}
+      {!draft && catalog.loading ? (
         <div style={{ marginTop: 8 }}>
-          <Button
-            size="small"
-            type="dashed"
-            icon={<PlusOutlined />}
-            disabled={!!editingId}
-            onClick={openDraft}
-          >
-            Добавить материал
-          </Button>
-          {catalog.loading ? (
-            <span style={{ marginLeft: 8 }}>
-              <Spin size="small" />
-            </span>
-          ) : null}
+          <Spin size="small" />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
