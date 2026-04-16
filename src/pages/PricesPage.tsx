@@ -12,7 +12,7 @@ export default function PricesPage() {
   const [params, setParams] = useSearchParams();
   const tab = useMemo<TabKey>(() => {
     const t = params.get('tab') as TabKey | null;
-    return t && TAB_KEYS.includes(t) ? t : 'fsnb';
+    return t && TAB_KEYS.includes(t) ? t : 'estimates';
   }, [params]);
 
   const handleChange = (key: string) => {
