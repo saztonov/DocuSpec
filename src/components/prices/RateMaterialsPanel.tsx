@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   App,
   AutoComplete,
@@ -107,18 +107,27 @@ export default function RateMaterialsPanel({
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const onCountChangeRef = useRef(onMaterialsCountChange);
+  useEffect(() => {
+    onCountChangeRef.current = onMaterialsCountChange;
+  }, [onMaterialsCountChange]);
+  const lastReportedCountRef = useRef<number | null>(null);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const data = await loadRateMaterials(rateId);
       setRows(data);
-      onMaterialsCountChange?.(data.length);
+      if (lastReportedCountRef.current !== data.length) {
+        lastReportedCountRef.current = data.length;
+        onCountChangeRef.current?.(data.length);
+      }
     } catch (err) {
       if (err instanceof Error) message.error(err.message);
     } finally {
       setLoading(false);
     }
-  }, [rateId, message, onMaterialsCountChange]);
+  }, [rateId, message]);
 
   useEffect(() => {
     void refresh();
