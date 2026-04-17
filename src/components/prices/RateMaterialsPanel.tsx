@@ -255,6 +255,7 @@ export default function RateMaterialsPanel({
         title: 'Материалы',
         dataIndex: 'material_name',
         key: 'material_name',
+        className: 'rmp-materials-col',
       },
       {
         title: 'Ед. изм.',
@@ -367,6 +368,7 @@ export default function RateMaterialsPanel({
 
   return (
     <div style={{ padding: '8px 4px' }}>
+      <style>{`.rmp-materials-col { padding-left: 36px !important; }`}</style>
       {rows.length > 0 ? (
         <Table<RateMaterialRow>
           rowKey="id"
