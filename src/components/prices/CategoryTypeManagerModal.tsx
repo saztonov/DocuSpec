@@ -71,6 +71,7 @@ interface Props {
 interface RowProps {
   id: string;
   name: string;
+  number?: number;
   badge?: string;
   isEditing: boolean;
   editBuffer: string;
@@ -112,6 +113,15 @@ function SortableRow(props: RowProps) {
       >
         <HolderOutlined />
       </span>
+
+      {props.number !== undefined && (
+        <Typography.Text
+          type="secondary"
+          style={{ minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
+        >
+          {props.number}.
+        </Typography.Text>
+      )}
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {props.isEditing ? (
@@ -520,11 +530,12 @@ export default function CategoryTypeManagerModal({ open, onClose, onChanged }: P
               >
                 <SortableContext items={ids} strategy={verticalListSortingStrategy}>
                   <div>
-                    {categories.map((c) => (
+                    {categories.map((c, idx) => (
                       <SortableRow
                         key={c.id}
                         id={c.id}
                         name={c.name}
+                        number={idx + 1}
                         badge={`видов: ${c.types_count}`}
                         isEditing={editingId === c.id}
                         editBuffer={editBuffer}

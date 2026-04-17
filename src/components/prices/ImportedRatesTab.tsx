@@ -1361,7 +1361,10 @@ export default function ImportedRatesTab() {
           optionFilterProp="label"
           value={categoryId}
           onChange={(v) => handleCategoryChange(v ?? null)}
-          options={categories.map((c) => ({ label: c.name, value: c.id }))}
+          options={categories.map((c, idx) => ({
+            label: `${idx + 1}. ${c.name}`,
+            value: c.id,
+          }))}
         />
         <Select
           style={{ minWidth: 260 }}
