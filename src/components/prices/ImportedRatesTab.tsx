@@ -56,6 +56,7 @@ import {
 } from '../../lib/importedRates';
 import { useMaterialsCatalog } from '../../hooks/useMaterialsCatalog';
 import RateMaterialsPanel from './RateMaterialsPanel';
+import CategoryTypeManagerModal from './CategoryTypeManagerModal';
 
 type CategoryRow = {
   rowKind: 'category';
@@ -160,6 +161,9 @@ export default function ImportedRatesTab() {
   // Раскрытие расценок + сигнал на добавление материала
   const [expandedRateKeys, setExpandedRateKeys] = useState<string[]>([]);
   const [addMaterialForRateId, setAddMaterialForRateId] = useState<string | null>(null);
+
+  // Менеджер категорий/видов
+  const [managerOpen, setManagerOpen] = useState(false);
 
   const flatMode = appliedSearch.trim().length > 0;
 
@@ -515,13 +519,24 @@ export default function ImportedRatesTab() {
         const created = await createCategory(name);
         setDraftCategories((d) => d.filter((r) => r.id !== row.id));
         setTreeCategories((list) => {
-          const next = [...list, { id: created.id, name: created.name, types_count: 0 }];
-          next.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+          const next = [
+            ...list,
+            {
+              id: created.id,
+              name: created.name,
+              sort_order: created.sort_order,
+              types_count: 0,
+            },
+          ];
+          next.sort((a, b) => a.sort_order - b.sort_order);
           return next;
         });
         setCategories((list) => {
-          const next = [...list, { id: created.id, name: created.name }];
-          next.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+          const next = [
+            ...list,
+            { id: created.id, name: created.name, sort_order: created.sort_order },
+          ];
+          next.sort((a, b) => a.sort_order - b.sort_order);
           return next;
         });
         msg.success('Категория добавлена');
@@ -530,12 +545,12 @@ export default function ImportedRatesTab() {
         setTreeCategories((list) =>
           list
             .map((c) => (c.id === row.id ? { ...c, name: updated.name } : c))
-            .sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+            .sort((a, b) => a.sort_order - b.sort_order),
         );
         setCategories((list) =>
           list
             .map((c) => (c.id === row.id ? { ...c, name: updated.name } : c))
-            .sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+            .sort((a, b) => a.sort_order - b.sort_order),
         );
         msg.success('Категория переименована');
       }
@@ -628,10 +643,11 @@ export default function ImportedRatesTab() {
               id: created.id,
               category_id: created.category_id,
               name: created.name,
+              sort_order: created.sort_order,
               rates_count: 0,
             },
           ];
-          next.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+          next.sort((a, b) => a.sort_order - b.sort_order);
           return { ...m, [row.category_id]: next };
         });
         setTreeCategories((list) =>
@@ -650,7 +666,7 @@ export default function ImportedRatesTab() {
           if (!list) return m;
           const next = list
             .map((t) => (t.id === row.id ? { ...t, name: updated.name } : t))
-            .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+            .sort((a, b) => a.sort_order - b.sort_order);
           return { ...m, [row.category_id]: next };
         });
         if (categoryId === row.category_id) {
@@ -1372,6 +1388,9 @@ export default function ImportedRatesTab() {
         <Button icon={<ReloadOutlined />} onClick={handleReset}>
           Сбросить
         </Button>
+        <Button icon={<PlusOutlined />} onClick={() => setManagerOpen(true)}>
+          Категория
+        </Button>
 
         <div
           style={{
@@ -1462,6 +1481,17 @@ export default function ImportedRatesTab() {
           )}
         </>
       )}
+
+      <CategoryTypeManagerModal
+        open={managerOpen}
+        onClose={() => setManagerOpen(false)}
+        onChanged={() => {
+          void refreshCategories();
+          void refreshTypes(categoryId);
+          void refreshTree();
+          if (flatMode) void refreshFlat();
+        }}
+      />
     </div>
   );
 }

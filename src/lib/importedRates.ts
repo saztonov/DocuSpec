@@ -13,12 +13,14 @@ export interface ParsedRate {
 export interface RateCategory {
   id: string;
   name: string;
+  sort_order: number;
 }
 
 export interface RateType {
   id: string;
   category_id: string;
   name: string;
+  sort_order: number;
 }
 
 export type RateKind = 'base' | 'optional';
@@ -240,14 +242,19 @@ export async function importRates(rows: ParsedRate[]): Promise<{
 export async function loadCategories(): Promise<RateCategory[]> {
   const { data, error } = await supabase
     .from('imported_rate_categories')
-    .select('id, name')
+    .select('id, name, sort_order')
+    .order('sort_order')
     .order('name');
   if (error) throw error;
   return data ?? [];
 }
 
 export async function loadTypes(categoryId?: string | null): Promise<RateType[]> {
-  let q = supabase.from('imported_rate_types').select('id, category_id, name').order('name');
+  let q = supabase
+    .from('imported_rate_types')
+    .select('id, category_id, name, sort_order')
+    .order('sort_order')
+    .order('name');
   if (categoryId) q = q.eq('category_id', categoryId);
   const { data, error } = await q;
   if (error) throw error;
@@ -301,6 +308,7 @@ export async function loadRates(params: {
 export interface RateCategoryNode {
   id: string;
   name: string;
+  sort_order: number;
   types_count: number;
 }
 
@@ -308,18 +316,21 @@ export interface RateTypeNode {
   id: string;
   category_id: string;
   name: string;
+  sort_order: number;
   rates_count: number;
 }
 
 export async function loadCategoriesWithCounts(): Promise<RateCategoryNode[]> {
   const { data, error } = await supabase
     .from('imported_rate_categories')
-    .select('id, name, imported_rate_types(count)')
+    .select('id, name, sort_order, imported_rate_types(count)')
+    .order('sort_order')
     .order('name');
   if (error) throw error;
   return (data ?? []).map((c: any) => ({
     id: c.id,
     name: c.name,
+    sort_order: c.sort_order ?? 0,
     types_count: c.imported_rate_types?.[0]?.count ?? 0,
   }));
 }
@@ -327,14 +338,16 @@ export async function loadCategoriesWithCounts(): Promise<RateCategoryNode[]> {
 export async function loadTypesWithCounts(categoryId: string): Promise<RateTypeNode[]> {
   const { data, error } = await supabase
     .from('imported_rate_types')
-    .select('id, category_id, name, imported_rates(count)')
+    .select('id, category_id, name, sort_order, imported_rates(count)')
     .eq('category_id', categoryId)
+    .order('sort_order')
     .order('name');
   if (error) throw error;
   return (data ?? []).map((t: any) => ({
     id: t.id,
     category_id: t.category_id,
     name: t.name,
+    sort_order: t.sort_order ?? 0,
     rates_count: t.imported_rates?.[0]?.count ?? 0,
   }));
 }
@@ -414,13 +427,37 @@ export async function deleteImportedRate(id: string): Promise<void> {
   if (error) throw error;
 }
 
+async function nextCategorySortOrder(): Promise<number> {
+  const { data, error } = await supabase
+    .from('imported_rate_categories')
+    .select('sort_order')
+    .order('sort_order', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const max = data?.[0]?.sort_order ?? 0;
+  return max + 1;
+}
+
+async function nextTypeSortOrder(categoryId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('imported_rate_types')
+    .select('sort_order')
+    .eq('category_id', categoryId)
+    .order('sort_order', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const max = data?.[0]?.sort_order ?? 0;
+  return max + 1;
+}
+
 export async function createCategory(name: string): Promise<RateCategory> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error('Название категории обязательно');
+  const sortOrder = await nextCategorySortOrder();
   const { data, error } = await supabase
     .from('imported_rate_categories')
-    .insert({ name: trimmed })
-    .select('id, name')
+    .insert({ name: trimmed, sort_order: sortOrder })
+    .select('id, name, sort_order')
     .single();
   if (error) {
     if ((error as any).code === '23505') {
@@ -438,7 +475,7 @@ export async function updateCategoryName(id: string, name: string): Promise<Rate
     .from('imported_rate_categories')
     .update({ name: trimmed })
     .eq('id', id)
-    .select('id, name')
+    .select('id, name, sort_order')
     .single();
   if (error) {
     if ((error as any).code === '23505') {
@@ -449,23 +486,55 @@ export async function updateCategoryName(id: string, name: string): Promise<Rate
   return data as RateCategory;
 }
 
+export interface CategoryDeleteImpact {
+  types: number;
+  rates: number;
+}
+
+export async function categoryDeleteImpact(id: string): Promise<CategoryDeleteImpact> {
+  const { count: typesCount, error: tErr } = await supabase
+    .from('imported_rate_types')
+    .select('id', { count: 'exact', head: true })
+    .eq('category_id', id);
+  if (tErr) throw tErr;
+
+  const { count: ratesCount, error: rErr } = await supabase
+    .from('imported_rates')
+    .select('id, imported_rate_types!inner(category_id)', { count: 'exact', head: true })
+    .eq('imported_rate_types.category_id', id);
+  if (rErr) throw rErr;
+
+  return { types: typesCount ?? 0, rates: ratesCount ?? 0 };
+}
+
 export async function deleteCategory(id: string): Promise<void> {
   const { error } = await supabase.from('imported_rate_categories').delete().eq('id', id);
-  if (error) {
-    if ((error as any).code === '23503') {
-      throw new Error('Нельзя удалить категорию: в ней есть виды затрат');
-    }
-    throw error;
-  }
+  if (error) throw error;
+}
+
+export async function reorderCategories(orderedIds: string[]): Promise<void> {
+  if (orderedIds.length === 0) return;
+  await Promise.all(
+    orderedIds.map((id, idx) =>
+      supabase
+        .from('imported_rate_categories')
+        .update({ sort_order: idx + 1 })
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) throw error;
+        }),
+    ),
+  );
 }
 
 export async function createType(categoryId: string, name: string): Promise<RateType> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error('Название вида затрат обязательно');
+  const sortOrder = await nextTypeSortOrder(categoryId);
   const { data, error } = await supabase
     .from('imported_rate_types')
-    .insert({ category_id: categoryId, name: trimmed })
-    .select('id, category_id, name')
+    .insert({ category_id: categoryId, name: trimmed, sort_order: sortOrder })
+    .select('id, category_id, name, sort_order')
     .single();
   if (error) {
     if ((error as any).code === '23505') {
@@ -483,7 +552,7 @@ export async function updateTypeName(id: string, name: string): Promise<RateType
     .from('imported_rate_types')
     .update({ name: trimmed })
     .eq('id', id)
-    .select('id, category_id, name')
+    .select('id, category_id, name, sort_order')
     .single();
   if (error) {
     if ((error as any).code === '23505') {
@@ -494,14 +563,40 @@ export async function updateTypeName(id: string, name: string): Promise<RateType
   return data as RateType;
 }
 
+export interface TypeDeleteImpact {
+  rates: number;
+}
+
+export async function typeDeleteImpact(id: string): Promise<TypeDeleteImpact> {
+  const { count, error } = await supabase
+    .from('imported_rates')
+    .select('id', { count: 'exact', head: true })
+    .eq('type_id', id);
+  if (error) throw error;
+  return { rates: count ?? 0 };
+}
+
 export async function deleteType(id: string): Promise<void> {
   const { error } = await supabase.from('imported_rate_types').delete().eq('id', id);
-  if (error) {
-    if ((error as any).code === '23503') {
-      throw new Error('Нельзя удалить вид: в нём есть расценки');
-    }
-    throw error;
-  }
+  if (error) throw error;
+}
+
+export async function reorderTypes(
+  _categoryId: string,
+  orderedIds: string[],
+): Promise<void> {
+  if (orderedIds.length === 0) return;
+  await Promise.all(
+    orderedIds.map((id, idx) =>
+      supabase
+        .from('imported_rate_types')
+        .update({ sort_order: idx + 1 })
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) throw error;
+        }),
+    ),
+  );
 }
 
 export type ImportedRatePatch = Partial<
