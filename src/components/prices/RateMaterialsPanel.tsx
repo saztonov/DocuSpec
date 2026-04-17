@@ -252,7 +252,7 @@ export default function RateMaterialsPanel({
   const columns = useMemo<ColumnsType<RateMaterialRow>>(
     () => [
       {
-        title: '',
+        title: 'Материалы',
         dataIndex: 'material_name',
         key: 'material_name',
       },
