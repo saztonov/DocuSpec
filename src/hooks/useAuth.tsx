@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
+import { App as AntApp } from 'antd';
 import { supabase } from '../lib/supabase';
 import type { UserProfile } from '../lib/users';
 
@@ -9,6 +10,7 @@ interface AuthContextValue {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
+  profileLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -19,56 +21,94 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-async function fetchProfile(userId: string): Promise<UserProfile | null> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .maybeSingle();
-  if (error) throw error;
-  return (data ?? null) as UserProfile | null;
+type ProfileFetchResult =
+  | { ok: true; profile: UserProfile | null }
+  | { ok: false; error: unknown };
+
+// Ретраим при исключениях / ошибках запроса. Различаем «запрос прошёл, профиля нет»
+// (profile = null, ok: true) и «запрос не удался» (ok: false) — второе не должно разлогинивать.
+async function fetchProfileWithRetry(userId: string, attempts = 3): Promise<ProfileFetchResult> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+      if (error) {
+        lastError = error;
+      } else {
+        return { ok: true, profile: (data ?? null) as UserProfile | null };
+      }
+    } catch (err) {
+      lastError = err;
+    }
+    if (i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, 300 * Math.pow(2, i)));
+    }
+  }
+  return { ok: false, error: lastError };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const { message } = AntApp.useApp();
 
   // Защита от двойной обработки одной и той же сессии (StrictMode + onAuthStateChange).
   const lastHandledUserIdRef = useRef<string | null>(null);
 
-  const applySession = useCallback(async (next: Session | null) => {
-    setSession(next);
-    if (!next?.user) {
-      setProfile(null);
-      lastHandledUserIdRef.current = null;
-      return;
-    }
-    if (lastHandledUserIdRef.current === next.user.id) return;
-    lastHandledUserIdRef.current = next.user.id;
+  // onProfileError='keep' — при сетевой ошибке оставить сессию (восстановление после hard-reload).
+  // 'signout' — при сетевой ошибке сбросить сессию и бросить (явный signIn).
+  const applySession = useCallback(
+    async (next: Session | null, onProfileError: 'keep' | 'signout' = 'keep'): Promise<void> => {
+      setSession(next);
+      if (!next?.user) {
+        setProfile(null);
+        setProfileLoading(false);
+        lastHandledUserIdRef.current = null;
+        return;
+      }
+      if (lastHandledUserIdRef.current === next.user.id) return;
+      lastHandledUserIdRef.current = next.user.id;
 
-    let prof: UserProfile | null = null;
-    try {
-      prof = await fetchProfile(next.user.id);
-    } catch (err) {
-      console.error('Failed to load profile', err);
-    }
+      setProfileLoading(true);
+      const res = await fetchProfileWithRetry(next.user.id);
+      if (!res.ok) {
+        setProfileLoading(false);
+        if (onProfileError === 'signout') {
+          await supabase.auth.signOut();
+          throw new Error('Не удалось загрузить профиль. Проверьте соединение и попробуйте снова.');
+        }
+        console.warn('Profile load failed after retries', res.error);
+        message.warning('Не удалось загрузить профиль. Обновите страницу.', 4);
+        return;
+      }
 
-    if (!prof) {
-      // Профиль не создался (возможно, триггер выключен) — выкидываем.
-      await supabase.auth.signOut();
-      throw new Error('Профиль пользователя не найден. Обратитесь к администратору.');
-    }
-    if (prof.is_deleted) {
-      await supabase.auth.signOut();
-      throw new Error('Учётная запись отключена.');
-    }
-    if (!prof.is_active) {
-      await supabase.auth.signOut();
-      throw new Error('Учётная запись ожидает активации администратором.');
-    }
-    setProfile(prof);
-  }, []);
+      const prof = res.profile;
+      if (!prof) {
+        setProfileLoading(false);
+        await supabase.auth.signOut();
+        throw new Error('Профиль пользователя не найден. Обратитесь к администратору.');
+      }
+      if (prof.is_deleted) {
+        setProfileLoading(false);
+        await supabase.auth.signOut();
+        throw new Error('Учётная запись отключена.');
+      }
+      if (!prof.is_active) {
+        setProfileLoading(false);
+        await supabase.auth.signOut();
+        throw new Error('Учётная запись ожидает активации администратором.');
+      }
+      setProfile(prof);
+      setProfileLoading(false);
+    },
+    [message],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -76,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .getSession()
       .then(({ data }) => {
         if (!mounted) return;
-        return applySession(data.session);
+        return applySession(data.session, 'keep');
       })
       .catch((err) => {
         console.error(err);
@@ -86,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
-      void applySession(next).catch((err) => {
+      void applySession(next, 'keep').catch((err) => {
         console.error(err);
       });
     });
@@ -101,9 +141,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      // applySession бросит исключение, если is_active=false / is_deleted=true.
+      // applySession бросит исключение, если is_active=false / is_deleted=true / сетевой сбой.
       lastHandledUserIdRef.current = null;
-      await applySession(data.session);
+      await applySession(data.session, 'signout');
     },
     [applySession],
   );
@@ -121,6 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     setProfile(null);
+    setProfileLoading(false);
     lastHandledUserIdRef.current = null;
   }, []);
 
@@ -138,8 +179,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = useCallback(async () => {
     if (!session?.user) return;
-    const prof = await fetchProfile(session.user.id);
-    setProfile(prof);
+    const res = await fetchProfileWithRetry(session.user.id);
+    if (res.ok) setProfile(res.profile);
   }, [session?.user]);
 
   const value = useMemo<AuthContextValue>(
@@ -148,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: session?.user ?? null,
       profile,
       loading,
+      profileLoading,
       signIn,
       signUp,
       signOut,
@@ -155,7 +197,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resetPasswordForEmail,
       refreshProfile,
     }),
-    [session, profile, loading, signIn, signUp, signOut, updateOwnPassword, resetPasswordForEmail, refreshProfile],
+    [session, profile, loading, profileLoading, signIn, signUp, signOut, updateOwnPassword, resetPasswordForEmail, refreshProfile],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

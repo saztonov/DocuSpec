@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Tabs, Form, Input, Button, Typography, App, Card } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -17,7 +17,7 @@ interface RegisterValues {
 }
 
 export default function LoginPage() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, session, profile, loading, profileLoading } = useAuth();
   const { message } = App.useApp();
   const navigate = useNavigate();
   const location = useLocation();
@@ -28,6 +28,14 @@ export default function LoginPage() {
   const [registerForm] = Form.useForm<RegisterValues>();
 
   const fromPath = (location.state as { from?: string } | null)?.from ?? '/';
+
+  // Если сессия уже восстановлена (например, после hard-reload нас не туда закинуло) —
+  // уходим на целевую страницу сами.
+  useEffect(() => {
+    if (!loading && !profileLoading && session && profile) {
+      navigate(fromPath, { replace: true });
+    }
+  }, [loading, profileLoading, session, profile, fromPath, navigate]);
 
   async function handleLogin(values: LoginValues) {
     setLoginLoading(true);
