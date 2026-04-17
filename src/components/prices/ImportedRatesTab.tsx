@@ -63,6 +63,7 @@ type CategoryRow = {
   key: string;
   id: string;
   name: string;
+  number?: number;
   types_count: number;
   isDraft?: boolean;
 };
@@ -744,21 +745,35 @@ export default function ImportedRatesTab() {
   }, [treeCategories, categoryId]);
 
   const treeData: CategoryRow[] = useMemo(() => {
+    const indexById = new Map(treeCategories.map((c, idx) => [c.id, idx + 1]));
     const rows: CategoryRow[] = visibleCategories.map((c) => ({
       rowKind: 'category',
       key: `cat-${c.id}`,
       id: c.id,
       name: c.name,
+      number: indexById.get(c.id),
       types_count: c.types_count,
     }));
     if (!categoryId) {
       rows.push(...draftCategories);
     }
     return rows;
-  }, [visibleCategories, draftCategories, categoryId]);
+  }, [treeCategories, visibleCategories, draftCategories, categoryId]);
 
   const categoryColumns: ColumnsType<CategoryRow> = useMemo(
     () => [
+      {
+        title: '№',
+        dataIndex: 'number',
+        width: 56,
+        align: 'right',
+        render: (_: unknown, row) =>
+          row.number !== undefined ? (
+            <Typography.Text type="secondary" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {row.number}
+            </Typography.Text>
+          ) : null,
+      },
       {
         title: 'Категория затрат',
         dataIndex: 'name',
